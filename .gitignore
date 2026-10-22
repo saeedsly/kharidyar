@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.venv/
+uploads/
+public/tessdata/
+server/data/*.sqlite*
+*.log
+.DS_Store
+local.properties
+android/.gradle/
+android/app/build/
+android/build/
+android/app/src/main/assets/public/
+public/downloads/
+KharidYar-v1.0.apk
+*.jks
