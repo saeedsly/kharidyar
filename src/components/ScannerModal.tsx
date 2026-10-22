@@ -4,10 +4,12 @@ import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/
 import { Capacitor } from '@capacitor/core';
 import {
   AlertTriangle,
+  ArrowLeftRight,
   Camera,
   Check,
   CheckCircle2,
   Cpu,
+  FileText,
   ImagePlus,
   Loader2,
   Plus,
@@ -79,7 +81,9 @@ export function ScannerModal({
   onConfirmSave,
 }: ScannerModalProps) {
   const [step, setStep] = useState<'capture' | 'scanning' | 'review'>('capture');
-  const [stageMessage, setStageMessage] = useState('آماده‌سازی موتور بینایی ماشین...');
+  const [stageMessage, setStageMessage] = useState('آماده‌سازی تصویر فاکتور...');
+  const [progressPct, setProgressPct] = useState<number>(8);
+  const [scanningPreviewUrl, setScanningPreviewUrl] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -88,8 +92,8 @@ export function ScannerModal({
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
   const [showOpenCvView, setShowOpenCvView] = useState(true);
   const [showBoxes, setShowBoxes] = useState(true);
+  const [showRawOcr, setShowRawOcr] = useState(false);
 
-  // Editable state in Review step
   const [storeName, setStoreName] = useState('');
   const [jalaliDate, setJalaliDate] = useState('');
   const [discountTotal, setDiscountTotal] = useState(0);
@@ -114,6 +118,7 @@ export function ScannerModal({
       stopCameraStream();
       setStep('capture');
       setScanResult(null);
+      setScanningPreviewUrl(null);
       setErrorMsg(null);
       return;
     }
@@ -125,11 +130,11 @@ export function ScannerModal({
 
   const startLiveWebCamera = async () => {
     setCameraError(null);
-    // On Native Android APK: prefer native full-resolution OS camera with auto-focus & flash!
     if (Capacitor.isNativePlatform()) {
       try {
         const photo = await CapCamera.getPhoto({
-          quality: 92,
+          quality: 90,
+          width: 1600,
           allowEditing: false,
           resultType: CameraResultType.DataUrl,
           source: CameraSource.Camera,
@@ -162,7 +167,7 @@ export function ScannerModal({
       });
     } catch {
       setCameraError(
-        'دسترسی مستقیم به وب‌کم در این مرورگر فعال نشد؛ می‌توانید از دکمه انتخاب عکس/دوربین موبایل یا نمونه‌فاکتورهای واقعی پایین استفاده کنید.'
+        'دسترسی مستقیم به وب‌کم فعال نشد؛ از دکمه «انتخاب از گالری / فایل» برای آپلود عکس فاکتور استفاده کنید.'
       );
     }
   };
@@ -176,9 +181,30 @@ export function ScannerModal({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/png');
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
     stopCameraStream();
     await executeScan({ dataUrl });
+  };
+
+  const pickFromGallery = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const photo = await CapCamera.getPhoto({
+          quality: 90,
+          width: 1600,
+          allowEditing: false,
+          resultType: CameraResultType.DataUrl,
+          source: CameraSource.Photos,
+        });
+        if (photo.dataUrl) {
+          await executeScan({ dataUrl: photo.dataUrl });
+        }
+        return;
+      } catch (err: any) {
+        if (String(err?.message || '').toLowerCase().includes('cancel')) return;
+      }
+    }
+    fileInputRef.current?.click();
   };
 
   const executeScan = async (input: {
@@ -187,8 +213,9 @@ export function ScannerModal({
     dataUrl?: string | null;
   }) => {
     setErrorMsg(null);
+    setProgressPct(8);
+    setStageMessage('بهینه‌سازی ابعاد و کنتراست عکس فاکتور...');
     setStep('scanning');
-    setStageMessage('پیش‌پردازش تصویر و تشخیص کادر فاکتور با OpenCV 5.0...');
 
     try {
       const result = await scanReceiptHybrid({
@@ -196,7 +223,11 @@ export function ScannerModal({
         serverUrl,
         serverOnline,
         shoppingItems: targetShoppingItems,
-        onStage: (msg) => setStageMessage(msg),
+        onProgress: (msg, pct, previewUrl) => {
+          setStageMessage(msg);
+          setProgressPct(pct);
+          if (previewUrl) setScanningPreviewUrl(previewUrl);
+        },
       });
 
       setScanResult(result);
@@ -204,6 +235,7 @@ export function ScannerModal({
       setJalaliDate(result.receipt.jalali_date || '۱۴۰۵/۰۸/۰۱');
       setDiscountTotal(result.receipt.discount_total || 0);
       setItems(result.receipt.items || []);
+      setShowRawOcr((result.receipt.items || []).length === 0);
       setStep('review');
     } catch (err: any) {
       setErrorMsg(err?.message || 'خطا در خوانش تصویر فاکتور. لطفاً دوباره امتحان کنید.');
@@ -211,7 +243,18 @@ export function ScannerModal({
     }
   };
 
-  // Live reactive reconciliation whenever user edits an item or switches target Shopping List!
+  // One-tap Rial <-> Toman converter (÷10 or ×10) if user wants to switch currency unit!
+  const scaleAllPrices = (factor: number) => {
+    setItems((prev) =>
+      prev.map((it) => ({
+        ...it,
+        unit_price: Math.round(it.unit_price * factor),
+        total_price: Math.round(it.total_price * factor),
+      }))
+    );
+    setDiscountTotal((d) => Math.round(d * factor));
+  };
+
   const liveReconciliation = reconcileReceiptWithShoppingList(items, targetShoppingItems);
   const liveSubtotal = items.reduce((s, it) => s + Number(it.total_price || 0), 0);
   const liveGrandTotal = Math.max(0, liveSubtotal - Number(discountTotal || 0));
@@ -266,7 +309,7 @@ export function ScannerModal({
           exit={{ y: 36, opacity: 0 }}
           className="relative flex flex-col w-full max-w-xl max-h-[94vh] rounded-t-3xl sm:rounded-3xl bg-[#F6F8FC] shadow-2xl overflow-hidden border border-slate-200"
         >
-          {/* Clean Top Sheet Header */}
+          {/* Top Header */}
           <div className="flex items-center justify-between bg-white px-5 py-4 border-b border-slate-200/80 shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white">
@@ -294,7 +337,7 @@ export function ScannerModal({
             </button>
           </div>
 
-          {/* Scrollable Content Body */}
+          {/* Body */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
             {errorMsg && (
               <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3.5 text-xs font-semibold text-rose-800">
@@ -302,7 +345,7 @@ export function ScannerModal({
               </div>
             )}
 
-            {/* STEP 1: CAPTURE / UPLOAD / LIVE TEST SAMPLES */}
+            {/* STEP 1: CAPTURE / UPLOAD / SAMPLES */}
             {step === 'capture' && (
               <>
                 {cameraActive ? (
@@ -314,7 +357,6 @@ export function ScannerModal({
                       muted
                       className="h-full w-full object-cover"
                     />
-                    {/* Viewfinder Framing Corners + Animated Laser */}
                     <div className="pointer-events-none absolute inset-6 rounded-2xl border-2 border-white/35">
                       <motion.div
                         animate={{ y: ['0%', '92%', '0%'] }}
@@ -357,24 +399,24 @@ export function ScannerModal({
 
                       <button
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={pickFromGallery}
                         className="flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-slate-50 border-2 border-dashed border-slate-300 p-6 text-slate-800 hover:border-blue-500 hover:bg-blue-50/30 transition cursor-pointer"
                       >
                         <ImagePlus className="h-8 w-8 text-blue-600" />
                         <span className="text-sm font-extrabold">انتخاب از گالری / فایل</span>
                         <span className="text-[11px] text-slate-500">
-                          پشتیبانی از عکس دوربین و اسکرین‌شات
+                          فشرده‌سازی خودکار و خوانش سریع
                         </span>
                       </button>
                     </div>
 
-                    {/* Hidden file input supporting native mobile camera & photo library */}
                     <input
                       ref={fileInputRef}
                       type="file"
                       accept="image/*"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
+                        e.target.value = '';
                         if (f) void executeScan({ file: f });
                       }}
                       className="hidden"
@@ -388,12 +430,11 @@ export function ScannerModal({
                   </div>
                 )}
 
-                {/* Built-in Real Pixel Persian Thermal Receipts for Instant 1-Tap Live CV Testing */}
                 <div className="rounded-3xl bg-white p-5 border border-slate-200/80 space-y-3">
                   <div className="flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-blue-600" />
                     <h3 className="text-xs font-extrabold text-slate-900">
-                      تست فوری زنده با تصاویر واقعی فاکتور فروشگاهی (پردازش واقعی OpenCV + OCR فارسی)
+                      تست فوری با تصاویر فاکتور فروشگاهی (پردازش زنده OpenCV + OCR فارسی)
                     </h3>
                   </div>
 
@@ -424,30 +465,55 @@ export function ScannerModal({
               </>
             )}
 
-            {/* STEP 2: LIVE COMPUTER VISION PIPELINE ANIMATION */}
+            {/* STEP 2: LIVE VISUAL SCAN PREVIEW + REAL PERCENTAGE PROGRESS BAR */}
             {step === 'scanning' && (
-              <div className="rounded-3xl bg-white p-10 text-center border border-slate-200/80 space-y-5">
-                <div className="relative mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-50 text-blue-600">
-                  <Loader2 className="h-10 w-10 animate-spin" />
+              <div className="rounded-3xl bg-white p-6 text-center border border-slate-200/80 space-y-5">
+                {scanningPreviewUrl ? (
+                  <div className="relative mx-auto max-w-[260px] max-h-56 overflow-hidden rounded-2xl border-2 border-blue-500/50 bg-slate-100 shadow-md">
+                    <img
+                      src={scanningPreviewUrl}
+                      alt="در حال اسکن"
+                      className="w-full h-48 object-cover opacity-90"
+                    />
+                    <motion.div
+                      animate={{ top: ['4%', '92%', '4%'] }}
+                      transition={{ duration: 2.0, repeat: Infinity, ease: 'easeInOut' }}
+                      className="pointer-events-none absolute inset-x-0 h-1 bg-blue-500 shadow-[0_0_18px_4px_rgba(37,99,235,0.85)]"
+                    />
+                  </div>
+                ) : (
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-extrabold text-slate-800 px-1 tabular-fa">
+                    <span>در حال خوانش هوشمند فاکتور...</span>
+                    <span className="text-blue-600">{toPersianDigits(progressPct)}٪</span>
+                  </div>
+                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                      style={{ width: `${Math.max(8, progressPct)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs font-medium text-slate-500 pt-1">{stageMessage}</p>
                 </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900">
-                    در حال خوانش هوشمند اقلام و ارقام فاکتور...
-                  </h3>
-                  <p className="mt-1.5 text-xs font-medium text-blue-600">{stageMessage}</p>
-                </div>
-                <div className="mx-auto max-w-xs space-y-2 text-right text-[11px] text-slate-500 bg-slate-50 rounded-2xl p-3.5">
-                  <p>۱. حذف سایه و تقویت کنتراست جوهر حرارتی (OpenCV CLAHE)</p>
-                  <p>۲. خوانش دوگانه شبکه عصبی فارسی و عددی (Dual-Head LSTM)</p>
-                  <p>۳. کنترل ریاضی جمع اقلام و تطبیق هوشمند با لیست خرید</p>
-                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setStep('capture')}
+                  className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 cursor-pointer"
+                >
+                  لغو و انتخاب تصویر دیگر
+                </button>
               </div>
             )}
 
-            {/* STEP 3: INTERACTIVE VISUAL BOUNDING BOX OVERLAY + RECONCILIATION + EDIT & SAVE */}
+            {/* STEP 3: REVIEW + BOUNDING BOXES + RECONCILIATION */}
             {step === 'review' && scanResult && (
               <div className="space-y-4">
-                {/* Visual Receipt Scan + Bounding Boxes Inspector */}
                 {(scanResult.processedImageUrl || scanResult.originalImageUrl) && (
                   <div className="rounded-3xl bg-white p-4 border border-slate-200/80 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -457,7 +523,7 @@ export function ScannerModal({
                         {toPersianDigits((scanResult.durationMs / 1000).toFixed(1))} ثانیه)
                       </span>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <button
                           type="button"
                           onClick={() => setShowOpenCvView((v) => !v)}
@@ -475,13 +541,21 @@ export function ScannerModal({
                                 : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            کادر تشخیص خطوط
+                            کادر خطوط
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setShowRawOcr((v) => !v)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-200 cursor-pointer"
+                        >
+                          <FileText className="h-3 w-3" />
+                          متن خام OCR
+                        </button>
                       </div>
                     </div>
 
-                    <div className="relative max-h-64 overflow-y-auto rounded-2xl bg-slate-900/5 border border-slate-200">
+                    <div className="relative max-h-60 overflow-y-auto rounded-2xl bg-slate-900/5 border border-slate-200">
                       <div className="relative w-full">
                         <img
                           src={
@@ -507,14 +581,20 @@ export function ScannerModal({
                           ))}
                       </div>
                     </div>
+
+                    {showRawOcr && (
+                      <div className="rounded-2xl bg-slate-900 text-slate-100 p-3.5 text-xs leading-relaxed font-mono whitespace-pre-wrap max-h-44 overflow-y-auto">
+                        {scanResult.rawOcrText || 'متنی یافت نشد'}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* Automatic Shopping List Reconciliation Report! */}
+                {/* Shopping List Reconciliation Summary */}
                 <div className="rounded-3xl bg-white p-4.5 border border-slate-200/80 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-extrabold text-slate-900">
-                      نتیجه تطبیق با لیست خرید:
+                      تطبیق خودکار با لیست خرید:
                     </span>
                     <select
                       value={activeListId}
@@ -570,7 +650,7 @@ export function ScannerModal({
                   )}
                 </div>
 
-                {/* Store Header & Editable Line Items */}
+                {/* Editable Store Info & Line Items + Rial/Toman Quick Converter */}
                 <div className="rounded-3xl bg-white p-4.5 border border-slate-200/80 space-y-3.5">
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     <div className="sm:col-span-2">
@@ -597,7 +677,30 @@ export function ScannerModal({
                     </div>
                   </div>
 
-                  {/* Extracted Line Items (Editable) */}
+                  {/* Quick Rial <-> Toman Helper Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 border border-slate-200/70">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+                      <ArrowLeftRight className="h-3.5 w-3.5 text-blue-600" />
+                      اصلاح سریع واحد پول مبالغ:
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => scaleAllPrices(0.1)}
+                        className="rounded-lg bg-white border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer"
+                      >
+                        تبدیل ریال به تومان (÷۱۰)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => scaleAllPrices(10)}
+                        className="rounded-lg bg-white border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer"
+                      >
+                        ×۱۰
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-extrabold text-slate-800 tabular-fa">
@@ -711,7 +814,6 @@ export function ScannerModal({
                     })}
                   </div>
 
-                  {/* Summary Totals */}
                   <div className="rounded-2xl bg-slate-50 p-3.5 space-y-2 text-xs tabular-fa border border-slate-200/60">
                     <div className="flex justify-between text-slate-600">
                       <span>جمع کل اقلام:</span>
@@ -737,7 +839,6 @@ export function ScannerModal({
             )}
           </div>
 
-          {/* Sticky Bottom Action Bar in Review Step */}
           {step === 'review' && (
             <div className="flex items-center gap-2.5 bg-white px-5 py-4 border-t border-slate-200 shrink-0">
               <button

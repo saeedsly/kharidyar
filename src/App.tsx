@@ -28,6 +28,7 @@ import {
   supabase,
   syncOrDiscoverServerEndpoint,
   toggleShoppingItemDb,
+  writeLocalStateMirror,
 } from './lib/supabase';
 import { inferStoreCategory, toPersianDigits } from './lib/persianMatcher';
 import { DashboardTab } from './components/DashboardTab';
@@ -121,6 +122,12 @@ export default function App() {
       void supabase.removeChannel(channel);
     };
   }, [refreshData, refreshConnection]);
+
+  useEffect(() => {
+    if (lists.length > 0 || receipts.length > 0) {
+      writeLocalStateMirror(lists, items, receipts);
+    }
+  }, [lists, items, receipts]);
 
   useEffect(() => {
     const target = apkDownloadUrl.startsWith('http')
