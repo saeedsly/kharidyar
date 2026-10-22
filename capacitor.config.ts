@@ -1,10 +1,9 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'ir.kharidyar.app',
+  appId: 'com.saeedsalari.kharidyar',
   appName: 'خریدیـار',
   webDir: 'dist',
-  bundledWebRuntime: false,
   android: {
     allowMixedContent: true,
     backgroundColor: '#F2F5F9',

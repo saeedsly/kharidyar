@@ -1,5 +1,6 @@
 import { createWorker } from 'tesseract.js';
 import type { BoundingBox, ScanResponse, ShoppingItem } from '../types';
+import { assetUrl } from './assetUrl';
 import {
   fuseDualHeadLines,
   parsePersianReceiptText,
@@ -44,10 +45,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-/**
- * Compresses & normalizes ANY camera / gallery receipt photo (even 12MP–50MP 15MB JPEGs!)
- * right on the client in ~80ms to a crisp 1500px JPEG (~220 KB) so uploads NEVER stall or hit 413 limits!
- */
 export async function normalizeAndCompressReceiptPhoto(
   source: File | Blob | string
 ): Promise<{ compressedFile: File; previewDataUrl: string; width: number; height: number }> {
@@ -103,9 +100,6 @@ export async function normalizeAndCompressReceiptPhoto(
   }
 }
 
-/**
- * Client-side Illumination Shadow Flattening + Contrast Stretch for Standalone APK On-Device OCR!
- */
 async function enhanceImageOnCanvas(dataUrl: string): Promise<{
   enhancedDataUrl: string;
   width: number;
@@ -131,7 +125,6 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
       const imgData = ctx.getImageData(0, 0, w, h);
       const d = imgData.data;
 
-      // Collect grayscale histogram percentiles so shadowed dark camera photos stretch cleanly!
       const lumArr = new Uint8Array(w * h);
       for (let i = 0, p = 0; i < d.length; i += 4, p++) {
         lumArr[p] = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
@@ -167,11 +160,6 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
   });
 }
 
-/**
- * Full Autonomous On-Device Dual-Head Persian + English Neural OCR
- * CRITICAL FIX: `workerBlobURL: false` + full `${window.location.origin}/tessdata/...` URLs
- * so Web Workers on Chrome & Android Capacitor WebView NEVER choke on `blob:` relative `importScripts`!
- */
 export async function runOnDeviceAutonomousScan(
   dataUrl: string,
   shoppingItems: ShoppingItem[],
@@ -181,7 +169,8 @@ export async function runOnDeviceAutonomousScan(
   onProgress?.('بهینه‌سازی نور، سایه و کنتراست عکس فاکتور...', 12);
   const { enhancedDataUrl, width, height } = await enhanceImageOnCanvas(dataUrl);
 
-  const baseUrl = window.location.origin;
+  const workerJsUrl = assetUrl('tessdata/worker.min.js');
+  const tessdataBaseUrl = assetUrl('tessdata').replace(/\/$/, '');
   let p1 = 0;
   let p2 = 0;
 
@@ -191,9 +180,9 @@ export async function runOnDeviceAutonomousScan(
     Promise.all([
       createWorker('fas', 1, {
         workerBlobURL: false,
-        workerPath: `${baseUrl}/tessdata/worker.min.js`,
-        corePath: `${baseUrl}/tessdata`,
-        langPath: `${baseUrl}/tessdata`,
+        workerPath: workerJsUrl,
+        corePath: tessdataBaseUrl,
+        langPath: tessdataBaseUrl,
         gzip: true,
         cacheMethod: 'none',
         logger: (m) => {
@@ -206,9 +195,9 @@ export async function runOnDeviceAutonomousScan(
       }),
       createWorker(['fas', 'eng'], 1, {
         workerBlobURL: false,
-        workerPath: `${baseUrl}/tessdata/worker.min.js`,
-        corePath: `${baseUrl}/tessdata`,
-        langPath: `${baseUrl}/tessdata`,
+        workerPath: workerJsUrl,
+        corePath: tessdataBaseUrl,
+        langPath: tessdataBaseUrl,
         gzip: true,
         cacheMethod: 'none',
         logger: (m) => {
@@ -220,8 +209,8 @@ export async function runOnDeviceAutonomousScan(
         },
       }),
     ]),
-    20000,
-    'راه‌اندازی موتور عصبی داخل دستگاه'
+    25000,
+    'راه‌اندازی موتور عصبی داخل مرورگر/گوشی'
   );
 
   try {
@@ -231,7 +220,7 @@ export async function runOnDeviceAutonomousScan(
         fasWorker.recognize(enhancedDataUrl, {}, { blocks: true }),
         biWorker.recognize(enhancedDataUrl, {}, { blocks: true }),
       ]),
-      30000,
+      35000,
       'خوانش تصویر فاکتور'
     );
 
@@ -277,7 +266,7 @@ export async function runOnDeviceAutonomousScan(
 
     return {
       ok: true,
-      engine: 'موتور عصبی داخلی موبایل (On-Device Dual-Head Persian LSTM)',
+      engine: 'موتور عصبی Dual-Head Persian LSTM',
       durationMs: Date.now() - startedAt,
       originalImageUrl: dataUrl,
       processedImageUrl: enhancedDataUrl,
@@ -286,7 +275,7 @@ export async function runOnDeviceAutonomousScan(
       rawOcrText: fusedLines.join('\n'),
       receipt: {
         ...parsed,
-        ocr_engine: 'On-Device Persian LSTM OCR',
+        ocr_engine: 'Dual-Head Persian LSTM OCR',
         raw_ocr_text: fusedLines.join('\n'),
         image_url: dataUrl,
         processed_image_url: enhancedDataUrl,
@@ -298,13 +287,6 @@ export async function runOnDeviceAutonomousScan(
   }
 }
 
-/**
- * Unified Hang-Proof Hybrid Scanner:
- * 1. Compresses large camera photos in < 100ms so uploads are instant (~190 KB)
- * 2. Optional Cloud Multimodal AI (`Gemini 2.5 Flash` / `GPT-4o`) if API key provided
- * 3. Live Python OpenCV 5.0 + Dual-Head Persian LSTM Server (`/api/scan`) with 18s AbortController
- * 4. Automatic Zero-Hang On-Device WASM Neural OCR inside Android APK / offline browser!
- */
 export async function scanReceiptHybrid(params: {
   file?: File | null;
   sampleId?: string | null;
@@ -319,7 +301,7 @@ export async function scanReceiptHybrid(params: {
 
   onProgress?.('آماده‌سازی و بهینه‌سازی رزولوشن عکس فاکتور...', 8);
   const resolvedSource: File | string =
-    file || dataUrl || `/samples/sample-${sampleId || 'ofogh'}.png`;
+    file || dataUrl || assetUrl(`samples/sample-${sampleId || 'ofogh'}.png`);
   const { compressedFile, previewDataUrl } = await normalizeAndCompressReceiptPhoto(resolvedSource);
   onProgress?.('تصویر آماده شد؛ شروع پردازش بینایی ماشین...', 18, previewDataUrl);
 
@@ -382,7 +364,8 @@ export async function scanReceiptHybrid(params: {
   const isCapacitorLocalOrigin =
     serverUrl.startsWith('capacitor://') ||
     serverUrl === 'http://localhost' ||
-    serverUrl === 'https://localhost';
+    serverUrl === 'https://localhost' ||
+    serverUrl.includes('.github.io');
 
   if (serverOnline && !isCapacitorLocalOrigin) {
     try {
@@ -438,7 +421,7 @@ export async function scanReceiptHybrid(params: {
     }
   }
 
-  // Layer 3: Autonomous On-Device Dual-Head Persian WASM OCR (100% standalone inside APK & browser!)
+  // Layer 3: Autonomous On-Device Dual-Head Persian WASM OCR (100% standalone on GitHub Pages & APK!)
   return await runOnDeviceAutonomousScan(previewDataUrl, shoppingItems, (stage, pct) =>
     onProgress?.(stage, pct, previewDataUrl)
   );

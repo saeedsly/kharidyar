@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import type { ReceiptItem, ScanResponse, ShoppingItem, ShoppingList } from '../types';
+import { assetUrl } from '../lib/assetUrl';
 import {
   formatToman,
   inferItemCategory,
@@ -52,19 +53,19 @@ const BUILTIN_SAMPLES = [
     id: 'ofogh',
     title: 'نمونه ۱: فروشگاه افق کوروش',
     desc: '۵ قلم منطبق با لیست خرید + ۲ قلم جا مانده (تست هوشمند هشدار)',
-    thumb: '/samples/sample-ofogh.png',
+    thumb: 'samples/sample-ofogh.png',
   },
   {
     id: 'janbo',
     title: 'نمونه ۲: فروشگاه جانبو (تکمیلی)',
     desc: 'شامل روغن مایع و گوجه فرنگی برای تکمیل ۱۰۰٪ اقلام جامانده',
-    thumb: '/samples/sample-janbo.png',
+    thumb: 'samples/sample-janbo.png',
   },
   {
     id: 'hyperstar',
     title: 'نمونه ۳: هایپراستار ارم',
     desc: 'فاکتور پروتئین و تره‌بار (مرغ تازه، برنج ایرانی، سیب درختی)',
-    thumb: '/samples/sample-hyperstar.png',
+    thumb: 'samples/sample-hyperstar.png',
   },
 ];
 
@@ -447,7 +448,7 @@ export function ScannerModal({
                         className="w-full flex items-center gap-3.5 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3 text-right hover:border-blue-400 hover:bg-blue-50/40 transition cursor-pointer"
                       >
                         <img
-                          src={s.thumb}
+                          src={assetUrl(s.thumb)}
                           alt={s.title}
                           className="h-14 w-14 shrink-0 rounded-xl object-cover border border-slate-200 bg-white"
                         />

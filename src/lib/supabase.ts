@@ -5,9 +5,6 @@ export const SUPABASE_URL = 'https://gngrgkrypvrgcnkldbhx.supabase.co';
 export const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImduZ3Jna3J5cHZyZ2Nua2xkYmh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTkyNzEsImV4cCI6MjEwODI3NTI3MX0.uHp5_u0ASWy5P0BVjppDC1h4MdXJ-0KgqJl_JkwSMQI';
 
-/**
- * Custom bounded fetch wrapper so slow/filtered mobile ISP networks in Iran NEVER stall UI!
- */
 const boundedSupabaseFetch: typeof fetch = async (input, init) => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 3500);
@@ -26,93 +23,114 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   realtime: { params: { eventsPerSecond: 10 } },
 });
 
-const CACHE_KEYS = {
-  lists: 'kharidyar_lists_v2',
-  items: 'kharidyar_items_v2',
-  receipts: 'kharidyar_receipts_v2',
-};
+const WORKSPACE_STORAGE_KEY = 'kharidyar_workspace_code_v1';
 
-const DEFAULT_FALLBACK_LISTS: ShoppingList[] = [
-  {
-    id: 'local-default-list',
-    title: 'خرید هفتگی خانه',
-    store_hint: 'فروشگاه زنجیره‌ای افق کوروش',
-    status: 'active',
-  },
+export function getWorkspaceId(): string {
+  try {
+    const existing = localStorage.getItem(WORKSPACE_STORAGE_KEY)?.trim().toUpperCase();
+    if (existing && existing.length >= 4) return existing;
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let randomPart = '';
+    for (let i = 0; i < 6; i++) {
+      randomPart += chars[Math.floor(Math.random() * chars.length)];
+    }
+    const generated = `KY-${randomPart}`;
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, generated);
+    return generated;
+  } catch {
+    return 'default';
+  }
+}
+
+export function setWorkspaceId(newCode: string): string {
+  const cleaned = newCode.trim().toUpperCase().replace(/[^A-Z0-9\-]/g, '');
+  const finalCode = cleaned.length >= 4 ? cleaned : getWorkspaceId();
+  try {
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, finalCode);
+  } catch {
+    // ignore
+  }
+  return finalCode;
+}
+
+function getCacheKeys(wsId: string) {
+  return {
+    lists: `kharidyar_${wsId}_lists`,
+    items: `kharidyar_${wsId}_items`,
+    receipts: `kharidyar_${wsId}_receipts`,
+  };
+}
+
+const STARTER_ITEMS_TEMPLATE = [
+  { name: 'شیر کم‌چرب', quantity: 2, unit: 'عدد', category: 'لبنیات' },
+  { name: 'پنیر فتا', quantity: 1, unit: 'بسته', category: 'لبنیات' },
+  { name: 'تخم‌مرغ', quantity: 1, unit: 'شانه', category: 'پروتئین' },
+  { name: 'نان تست', quantity: 1, unit: 'بسته', category: 'نان و غلات' },
+  { name: 'ماست یونانی', quantity: 1, unit: 'سطل', category: 'لبنیات' },
+  { name: 'روغن مایع', quantity: 1, unit: 'بطری', category: 'خواربار' },
+  { name: 'گوجه فرنگی', quantity: 2, unit: 'کیلو', category: 'میوه و سبزیجات' },
 ];
 
-const DEFAULT_FALLBACK_ITEMS: ShoppingItem[] = [
-  {
-    id: 'loc-1',
-    list_id: 'local-default-list',
-    name: 'شیر کم‌چرب',
-    quantity: 2,
-    unit: 'عدد',
-    category: 'لبنیات',
+function buildLocalFallbackData() {
+  const listId = 'local-starter-list';
+  const lists: ShoppingList[] = [
+    {
+      id: listId,
+      title: 'خرید هفتگی خانه',
+      store_hint: 'فروشگاه زنجیره‌ای افق کوروش',
+      status: 'active',
+    },
+  ];
+  const items: ShoppingItem[] = STARTER_ITEMS_TEMPLATE.map((t, idx) => ({
+    id: `starter-${idx + 1}`,
+    list_id: listId,
+    name: t.name,
+    quantity: t.quantity,
+    unit: t.unit,
+    category: t.category,
     is_checked: false,
     reconcile_status: 'pending',
-  },
-  {
-    id: 'loc-2',
-    list_id: 'local-default-list',
-    name: 'پنیر فتا',
-    quantity: 1,
-    unit: 'بسته',
-    category: 'لبنیات',
-    is_checked: false,
-    reconcile_status: 'pending',
-  },
-  {
-    id: 'loc-3',
-    list_id: 'local-default-list',
-    name: 'تخم‌مرغ',
-    quantity: 1,
-    unit: 'شانه',
-    category: 'پروتئین',
-    is_checked: false,
-    reconcile_status: 'pending',
-  },
-  {
-    id: 'loc-4',
-    list_id: 'local-default-list',
-    name: 'نان تست',
-    quantity: 1,
-    unit: 'بسته',
-    category: 'نان و غلات',
-    is_checked: false,
-    reconcile_status: 'pending',
-  },
-  {
-    id: 'loc-5',
-    list_id: 'local-default-list',
-    name: 'ماست یونانی',
-    quantity: 1,
-    unit: 'سطل',
-    category: 'لبنیات',
-    is_checked: false,
-    reconcile_status: 'pending',
-  },
-  {
-    id: 'loc-6',
-    list_id: 'local-default-list',
-    name: 'روغن مایع',
-    quantity: 1,
-    unit: 'بطری',
-    category: 'خواربار',
-    is_checked: false,
-    reconcile_status: 'pending',
-  },
-  {
-    id: 'loc-7',
-    list_id: 'local-default-list',
-    name: 'گوجه فرنگی',
-    quantity: 2,
-    unit: 'کیلو',
-    category: 'میوه و سبزیجات',
-    is_checked: false,
-    reconcile_status: 'pending',
-  },
-];
+  }));
+  const receipts: Receipt[] = [
+    {
+      id: 'starter-rec-1',
+      store_name: 'هایپراستار باکری',
+      store_category: 'سوپرمارکت',
+      jalali_date: '۱۴۰۵/۰۷/۲۸',
+      receipt_number: 'HS-88412',
+      subtotal: 555000,
+      discount_total: 45000,
+      tax_total: 0,
+      total_amount: 510000,
+      currency: 'تومان',
+      ocr_engine: 'OpenCV 5.0 + Persian LSTM OCR',
+      ocr_confidence: 97.4,
+      items: [
+        {
+          name: 'فیله مرغ تازه پروتئین',
+          quantity: 2,
+          unit: 'بسته',
+          unit_price: 165000,
+          total_price: 330000,
+          discount: 0,
+          category: 'پروتئین',
+          confidence: 98,
+        },
+        {
+          name: 'قهوه ترک ویژه بن‌مانو',
+          quantity: 1,
+          unit: 'بسته',
+          unit_price: 180000,
+          total_price: 180000,
+          discount: 0,
+          category: 'نوشیدنی',
+          confidence: 97,
+        },
+      ],
+    },
+  ];
+  return { lists, items, receipts };
+}
 
 function readCache<T>(key: string, fallback: T): T {
   try {
@@ -128,13 +146,108 @@ export function writeLocalStateMirror(
   items: ShoppingItem[],
   receipts: Receipt[]
 ) {
+  const keys = getCacheKeys(getWorkspaceId());
   try {
-    localStorage.setItem(CACHE_KEYS.lists, JSON.stringify(lists));
-    localStorage.setItem(CACHE_KEYS.items, JSON.stringify(items));
-    localStorage.setItem(CACHE_KEYS.receipts, JSON.stringify(receipts));
+    localStorage.setItem(keys.lists, JSON.stringify(lists));
+    localStorage.setItem(keys.items, JSON.stringify(items));
+    localStorage.setItem(keys.receipts, JSON.stringify(receipts));
   } catch {
     // ignore storage quota errors
   }
+}
+
+async function seedNewWorkspaceCloud(wsId: string): Promise<{
+  lists: ShoppingList[];
+  items: ShoppingItem[];
+  receipts: Receipt[];
+}> {
+  const { data: createdList, error } = await supabase
+    .from('shopping_lists')
+    .insert({
+      workspace_id: wsId,
+      title: 'خرید هفتگی خانه',
+      store_hint: 'فروشگاه زنجیره‌ای افق کوروش',
+      status: 'active',
+    })
+    .select()
+    .single();
+
+  if (error || !createdList) {
+    return buildLocalFallbackData();
+  }
+
+  const { data: createdItems } = await supabase
+    .from('shopping_items')
+    .insert(
+      STARTER_ITEMS_TEMPLATE.map((t) => ({
+        workspace_id: wsId,
+        list_id: createdList.id,
+        name: t.name,
+        quantity: t.quantity,
+        unit: t.unit,
+        category: t.category,
+        is_checked: false,
+        reconcile_status: 'pending',
+      }))
+    )
+    .select();
+
+  const { data: sampleRec } = await supabase
+    .from('receipts')
+    .insert({
+      workspace_id: wsId,
+      store_name: 'هایپراستار باکری',
+      store_category: 'سوپرمارکت',
+      jalali_date: '۱۴۰۵/۰۷/۲۸',
+      receipt_number: 'HS-88412',
+      subtotal: 555000,
+      discount_total: 45000,
+      tax_total: 0,
+      total_amount: 510000,
+      currency: 'تومان',
+      ocr_engine: 'OpenCV 5.0 + Persian LSTM OCR',
+      ocr_confidence: 97.4,
+      source_device: 'web',
+    })
+    .select()
+    .single();
+
+  let recItems: ReceiptItem[] = [];
+  if (sampleRec) {
+    const { data: insRecItems } = await supabase
+      .from('receipt_items')
+      .insert([
+        {
+          receipt_id: sampleRec.id,
+          name: 'فیله مرغ تازه ممتاز',
+          quantity: 2,
+          unit: 'بسته',
+          unit_price: 165000,
+          total_price: 330000,
+          discount: 0,
+          category: 'پروتئین',
+          confidence: 98,
+        },
+        {
+          name: 'قهوه ترک ویژه بن‌مانو',
+          quantity: 1,
+          unit: 'بسته',
+          unit_price: 180000,
+          total_price: 180000,
+          discount: 0,
+          category: 'نوشیدنی',
+          confidence: 97,
+        },
+      ])
+      .select();
+    recItems = (insRecItems as ReceiptItem[]) || [];
+  }
+
+  return {
+    lists: [createdList as ShoppingList],
+    items: (createdItems as ShoppingItem[]) || [],
+    receipts: sampleRec ? [{ ...(sampleRec as Receipt), items: recItems }] : [],
+  };
 }
 
 export async function fetchAllAppData(): Promise<{
@@ -143,44 +256,99 @@ export async function fetchAllAppData(): Promise<{
   receipts: Receipt[];
   cloudConnected: boolean;
 }> {
+  const wsId = getWorkspaceId();
+  const keys = getCacheKeys(wsId);
+
   try {
-    const [listsRes, itemsRes, receiptsRes, receiptItemsRes] = await Promise.all([
-      supabase.from('shopping_lists').select('*').order('created_at', { ascending: true }),
-      supabase.from('shopping_items').select('*').order('created_at', { ascending: true }),
-      supabase.from('receipts').select('*').order('created_at', { ascending: false }),
-      supabase.from('receipt_items').select('*').order('created_at', { ascending: true }),
+    const [listsRes, itemsRes, receiptsRes] = await Promise.all([
+      supabase
+        .from('shopping_lists')
+        .select('*')
+        .eq('workspace_id', wsId)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('shopping_items')
+        .select('*')
+        .eq('workspace_id', wsId)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('receipts')
+        .select('*')
+        .eq('workspace_id', wsId)
+        .order('created_at', { ascending: false }),
     ]);
 
     if (listsRes.error) throw listsRes.error;
 
-    const lists = (listsRes.data || []) as ShoppingList[];
-    const items = (itemsRes.data || []) as ShoppingItem[];
-    const allRecItems = (receiptItemsRes.data || []) as ReceiptItem[];
+    const existingLists = (listsRes.data || []) as ShoppingList[];
+    const existingReceipts = (receiptsRes.data || []) as Receipt[];
 
-    const receipts = ((receiptsRes.data || []) as Receipt[]).map((r) => ({
+    // First-time visitor initialization for this personal workspace!
+    const wasClearedIntentionally = localStorage.getItem(`kharidyar_${wsId}_cleared`) === '1';
+    if (existingLists.length === 0 && existingReceipts.length === 0 && !wasClearedIntentionally) {
+      const seeded = await seedNewWorkspaceCloud(wsId);
+      writeLocalStateMirror(seeded.lists, seeded.items, seeded.receipts);
+      return { ...seeded, cloudConnected: true };
+    }
+
+    const receiptIds = existingReceipts.map((r) => r.id);
+    let allRecItems: ReceiptItem[] = [];
+    if (receiptIds.length > 0) {
+      const { data: riData } = await supabase
+        .from('receipt_items')
+        .select('*')
+        .in('receipt_id', receiptIds)
+        .order('created_at', { ascending: true });
+      allRecItems = (riData as ReceiptItem[]) || [];
+    }
+
+    const items = (itemsRes.data || []) as ShoppingItem[];
+    const receipts = existingReceipts.map((r) => ({
       ...r,
       items: allRecItems.filter((ri) => ri.receipt_id === r.id),
     }));
 
-    writeLocalStateMirror(lists, items, receipts);
-
-    return { lists, items, receipts, cloudConnected: true };
+    writeLocalStateMirror(existingLists, items, receipts);
+    return { lists: existingLists, items, receipts, cloudConnected: true };
   } catch (err) {
     console.warn('[Supabase] Fast offline local cache active:', err);
+    const starter = buildLocalFallbackData();
     return {
-      lists: readCache<ShoppingList[]>(CACHE_KEYS.lists, DEFAULT_FALLBACK_LISTS),
-      items: readCache<ShoppingItem[]>(CACHE_KEYS.items, DEFAULT_FALLBACK_ITEMS),
-      receipts: readCache<Receipt[]>(CACHE_KEYS.receipts, []),
+      lists: readCache<ShoppingList[]>(keys.lists, starter.lists),
+      items: readCache<ShoppingItem[]>(keys.items, starter.items),
+      receipts: readCache<Receipt[]>(keys.receipts, starter.receipts),
       cloudConnected: false,
     };
   }
 }
 
+export async function clearAllWorkspaceDataDb(): Promise<void> {
+  const wsId = getWorkspaceId();
+  const keys = getCacheKeys(wsId);
+  try {
+    localStorage.setItem(`kharidyar_${wsId}_cleared`, '1');
+    localStorage.setItem(keys.lists, '[]');
+    localStorage.setItem(keys.items, '[]');
+    localStorage.setItem(keys.receipts, '[]');
+  } catch {
+    // ignore
+  }
+  try {
+    await Promise.all([
+      supabase.from('receipts').delete().eq('workspace_id', wsId),
+      supabase.from('shopping_lists').delete().eq('workspace_id', wsId),
+    ]);
+  } catch {
+    // offline safe
+  }
+}
+
 export async function createShoppingListDb(title: string, storeHint?: string): Promise<ShoppingList> {
+  const wsId = getWorkspaceId();
   try {
     const { data, error } = await supabase
       .from('shopping_lists')
-      .insert({ title, store_hint: storeHint || null, status: 'active' })
+      .insert({ workspace_id: wsId, title, store_hint: storeHint || null, status: 'active' })
       .select()
       .single();
     if (!error && data) return data as ShoppingList;
@@ -202,10 +370,12 @@ export async function addShoppingItemDb(item: {
   unit: string;
   category: string;
 }): Promise<ShoppingItem> {
+  const wsId = getWorkspaceId();
   try {
     const { data, error } = await supabase
       .from('shopping_items')
       .insert({
+        workspace_id: wsId,
         ...item,
         is_checked: false,
         reconcile_status: 'pending',
@@ -298,6 +468,7 @@ export async function saveScannedReceiptAndReconcileDb(params: {
   extraCount?: number;
   sourceDevice: string;
 }): Promise<Receipt> {
+  const wsId = getWorkspaceId();
   const { items, ...receiptHeader } = params.receipt;
   const fallbackLocalReceipt: Receipt = {
     id: crypto.randomUUID(),
@@ -307,7 +478,6 @@ export async function saveScannedReceiptAndReconcileDb(params: {
   };
 
   try {
-    // Avoid sending megabyte base64 strings into DB text columns; upload cleanly if needed
     let finalImageUrl = receiptHeader.image_url || null;
     if (finalImageUrl && finalImageUrl.startsWith('data:')) {
       const cloudUrl = await uploadReceiptImageToCloud(finalImageUrl);
@@ -321,6 +491,7 @@ export async function saveScannedReceiptAndReconcileDb(params: {
     const { data: savedHeader, error: headerErr } = await supabase
       .from('receipts')
       .insert({
+        workspace_id: wsId,
         store_name: receiptHeader.store_name,
         store_category: receiptHeader.store_category,
         jalali_date: receiptHeader.jalali_date,
@@ -423,15 +594,15 @@ export async function syncOrDiscoverServerEndpoint(apkFallbackUrl: string): Prom
     origin.startsWith('capacitor://') ||
     origin === 'http://localhost' ||
     origin === 'https://localhost';
+  const isStaticPublicCdn = origin.includes('.github.io');
 
-  if (!isCapacitorNative && !customOverride) {
+  if (!isCapacitorNative && !isStaticPublicCdn && !customOverride) {
     try {
       const resp = await fetch('/api/health');
       const ct = resp.headers.get('content-type') || '';
       if (resp.ok && ct.includes('application/json')) {
         const health = await resp.json();
         const apkUrl = health.apkReady ? `${origin}/api/download/apk` : apkFallbackUrl;
-        // Fire-and-forget non-blocking registration so UI never waits on cloud timeout!
         void supabase
           .from('server_registry')
           .upsert({
@@ -439,7 +610,7 @@ export async function syncOrDiscoverServerEndpoint(apkFallbackUrl: string): Prom
             server_url: origin,
             cv_engine: health.cvEngine || 'OpenCV 5.0 + Dual-Head Persian LSTM OCR',
             apk_download_url: apkUrl,
-            apk_version: '1.1.0',
+            apk_version: '1.2.0',
             status: 'online',
             last_heartbeat: new Date().toISOString(),
           })
@@ -484,7 +655,7 @@ export async function syncOrDiscoverServerEndpoint(apkFallbackUrl: string): Prom
   if (candidateUrl) {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 3000);
+      const timer = setTimeout(() => ctrl.abort(), 2800);
       const resp = await fetch(`${candidateUrl.replace(/\/$/, '')}/api/health`, {
         signal: ctrl.signal,
       });
@@ -501,7 +672,7 @@ export async function syncOrDiscoverServerEndpoint(apkFallbackUrl: string): Prom
         };
       }
     } catch {
-      // Server unreachable -> seamless autonomous on-device neural engine!
+      // Seamless autonomous WASM engine!
     }
   }
 
@@ -510,6 +681,6 @@ export async function syncOrDiscoverServerEndpoint(apkFallbackUrl: string): Prom
     isNativeApp: isCapacitorNative,
     serverOnline: false,
     apkDownloadUrl: discoveredApkUrl,
-    cvEngine: 'موتور عصبی داخلی موبایل (On-Device Persian LSTM OCR)',
+    cvEngine: 'موتور عصبی وب‌اسمبلی + کلود ابری (Dual-Head Persian WASM + Cloud AI)',
   };
 }

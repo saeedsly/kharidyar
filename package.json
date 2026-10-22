@@ -10,7 +10,7 @@
     "dev:server": "tsx server/index.ts",
     "build": "node scripts/prepare-assets.mjs && vite build",
     "cap:sync": "npm run build && npx cap sync android",
-    "start": "tsx server/index.ts"
+    "start": "bash -c '[ -d node_modules ] || npm install --no-audit --no-fund; [ -f dist/index.html ] || npm run build; exec npx tsx server/index.ts'"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

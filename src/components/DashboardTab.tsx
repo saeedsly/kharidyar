@@ -2,8 +2,11 @@ import { motion } from 'framer-motion';
 import {
   AlertTriangle,
   ArrowLeft,
+  Award,
   Camera,
   CheckCircle2,
+  ExternalLink,
+  Linkedin,
   ListChecks,
   ReceiptText,
   Sparkles,
@@ -12,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { Receipt, ShoppingItem, ShoppingList } from '../types';
 import { formatToman, toPersianDigits } from '../lib/persianMatcher';
+import { OWNER_LINKEDIN_URL } from './AboutOwnerModal';
 
 interface DashboardTabProps {
   receipts: Receipt[];
@@ -21,6 +25,7 @@ interface DashboardTabProps {
   onGoToList: () => void;
   onGoToReceipts: () => void;
   onSelectReceipt: (receipt: Receipt) => void;
+  onOpenAboutOwner: () => void;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -42,6 +47,7 @@ export function DashboardTab({
   onGoToList,
   onGoToReceipts,
   onSelectReceipt,
+  onOpenAboutOwner,
 }: DashboardTabProps) {
   const totalSpent = receipts.reduce((sum, r) => sum + Number(r.total_amount || 0), 0);
   const totalSaved = receipts.reduce((sum, r) => sum + Number(r.discount_total || 0), 0);
@@ -263,6 +269,52 @@ export function DashboardTab({
             </button>
           ))}
         </div>
+      </motion.div>
+
+      {/* Executive Creator Signature, Ownership Notice & Direct LinkedIn Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.18 }}
+        className="rounded-3xl bg-white p-5 shadow-[0_8px_30px_rgba(15,23,42,0.04)] border border-slate-200/70 space-y-3"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+              <Award className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold text-blue-600">طراحی، توسعه و مالکیت انحصاری اثر</p>
+              <h3 className="text-sm font-black text-slate-900 truncate">
+                سعید سالاری <span className="font-semibold text-slate-400">(Saeed Salari)</span>
+              </h3>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenAboutOwner}
+            className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-200 transition cursor-pointer"
+          >
+            بیوگرافی و مالکیت
+          </button>
+        </div>
+
+        <p className="text-xs leading-relaxed text-slate-600">
+          مهندس نرم‌افزار فول‌استک و معمار سیستم‌های هوشمند بینایی ماشین؛ خالق و صاحب امتیاز رسمی
+          اپلیکیشن «خریدیـار». کلیه حقوق مادی و معنوی این نرم‌افزار محفوظ است.
+        </p>
+
+        <a
+          href={OWNER_LINKEDIN_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-[#0A66C2] px-4 py-3 text-xs font-extrabold text-white shadow-xs hover:bg-[#004182] transition"
+        >
+          <Linkedin className="h-4 w-4 fill-current" />
+          <span>مشاهده پروفایل رسمی سعید سالاری در لینکدین</span>
+          <ExternalLink className="h-3.5 w-3.5 opacity-80" />
+        </a>
       </motion.div>
     </div>
   );

@@ -1,4 +1,4 @@
-package ir.kharidyar.app;
+package com.saeedsalari.kharidyar;
 
 import com.getcapacitor.BridgeActivity;
 

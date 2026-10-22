@@ -3,10 +3,13 @@ import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import QRCode from 'qrcode';
 import {
+  Award,
   Camera,
   CheckCircle2,
   Download,
+  ExternalLink,
   Home,
+  Linkedin,
   ListChecks,
   Maximize2,
   ReceiptText,
@@ -17,8 +20,10 @@ import {
   Wifi,
 } from 'lucide-react';
 import type { Receipt, ReceiptItem, ScanResponse, ShoppingItem, ShoppingList } from './types';
+import { assetUrl } from './lib/assetUrl';
 import {
   addShoppingItemDb,
+  clearAllWorkspaceDataDb,
   createShoppingListDb,
   deleteReceiptDb,
   deleteShoppingItemDb,
@@ -36,6 +41,7 @@ import { ShoppingListTab } from './components/ShoppingListTab';
 import { ReceiptsTab } from './components/ReceiptsTab';
 import { ServerConnectTab } from './components/ServerConnectTab';
 import { ScannerModal } from './components/ScannerModal';
+import { AboutOwnerModal, OWNER_LINKEDIN_URL } from './components/AboutOwnerModal';
 
 type TabKey = 'dashboard' | 'list' | 'receipts' | 'connect';
 
@@ -47,6 +53,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [desktopPhoneFrame, setDesktopPhoneFrame] = useState<boolean>(() => !isNative);
+  const [aboutModalOpen, setAboutModalOpen] = useState<boolean>(false);
 
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [items, setItems] = useState<ShoppingItem[]>([]);
@@ -58,9 +65,9 @@ export default function App() {
   const [scannerSampleId, setScannerSampleId] = useState<string | null>(null);
 
   const [serverUrl, setServerUrl] = useState<string>(() => window.location.origin);
-  const [serverOnline, setServerOnline] = useState<boolean>(true);
+  const [serverOnline, setServerOnline] = useState<boolean>(false);
   const [cloudConnected, setCloudConnected] = useState<boolean>(true);
-  const [cvEngine, setCvEngine] = useState<string>('OpenCV 5.0 + Dual-Head Persian LSTM OCR');
+  const [cvEngine, setCvEngine] = useState<string>('Dual-Head Persian LSTM OCR');
   const [apkDownloadUrl, setApkDownloadUrl] = useState<string>(GITHUB_RELEASE_APK_URL);
   const [sidebarQr, setSidebarQr] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -104,7 +111,6 @@ export default function App() {
     void refreshData();
     void refreshConnection();
 
-    // Live Realtime Subscription across Phone APK <-> Web Browser!
     const channel = supabase
       .channel('kharidyar-live-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' }, () => {
@@ -227,6 +233,14 @@ export default function App() {
     notify('تیک‌های لیست خرید برای خرید جدید آماده شد');
   };
 
+  const handleClearAllUserData = async () => {
+    await clearAllWorkspaceDataDb();
+    setLists([]);
+    setItems([]);
+    setReceipts([]);
+    notify('تمامی داده‌های فضای کاری شما به صورت کامل حذف شد.');
+  };
+
   const handleConfirmSaveReceipt = async (params: {
     scanResult: ScanResponse;
     editedStoreName: string;
@@ -239,7 +253,6 @@ export default function App() {
     const subtotal = params.editedItems.reduce((s, i) => s + Number(i.total_price || 0), 0);
     const totalAmount = Math.max(0, subtotal - Number(params.editedDiscount || 0));
 
-    // Optimistically update local shopping items checkmarks immediately!
     setItems((prev) =>
       prev.map((sItem) => {
         if (sItem.list_id !== params.targetListId) return sItem;
@@ -308,11 +321,11 @@ export default function App() {
 
   const mobileAppInner = (
     <div className="relative flex flex-col h-full bg-[#F4F6FA] text-slate-900">
-      {/* Clean Minimal App Header */}
-      <header className="sticky top-0 z-20 flex items-center justify-between bg-white/90 backdrop-blur-md px-5 py-3.5 pt-safe border-b border-slate-200/70">
+      {/* Clean Minimal App Header with Creator Ownership Badge */}
+      <header className="sticky top-0 z-20 flex items-center justify-between bg-white/90 backdrop-blur-md px-4 py-3.5 pt-safe border-b border-slate-200/70">
         <div className="flex items-center gap-2.5">
           <img
-            src="/icon-192.png"
+            src={assetUrl('icon-192.png')}
             alt="خریدیـار"
             className="h-9 w-9 rounded-2xl shadow-xs border border-blue-100"
           />
@@ -324,17 +337,28 @@ export default function App() {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('connect')}
-          className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200/80 px-3 py-1 text-[11px] font-bold text-emerald-800 cursor-pointer"
-        >
-          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          {serverOnline ? 'متصل خودکار' : 'هوش داخلی فعال'}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setAboutModalOpen(true)}
+            title="درباره سازنده و مالکیت اثر (سعید سالاری)"
+            className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200/80 px-2.5 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100 transition cursor-pointer"
+          >
+            <Award className="h-3.5 w-3.5" />
+            <span>مالکیت اثر</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('connect')}
+            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 text-[11px] font-bold text-emerald-800 cursor-pointer"
+          >
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            {serverOnline ? 'متصل' : 'فعال'}
+          </button>
+        </div>
       </header>
 
-      {/* Toast Notification Banner */}
       {toastMessage && (
         <div className="mx-4 mt-3 rounded-2xl bg-slate-900 px-4 py-3 text-xs font-bold text-white shadow-lg flex items-center gap-2 z-30">
           <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
@@ -342,7 +366,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Active Tab View */}
       <main className="flex-1 overflow-y-auto px-4 pt-4">
         {activeTab === 'dashboard' && (
           <DashboardTab
@@ -356,6 +379,7 @@ export default function App() {
               setSelectedReceipt(r);
               setActiveTab('receipts');
             }}
+            onOpenAboutOwner={() => setAboutModalOpen(true)}
           />
         )}
 
@@ -391,11 +415,13 @@ export default function App() {
             cvEngine={cvEngine}
             apkDownloadUrl={apkDownloadUrl}
             onRefreshConnection={refreshConnection}
+            onWorkspaceChanged={refreshData}
+            onOpenAboutOwner={() => setAboutModalOpen(true)}
           />
         )}
       </main>
 
-      {/* Apple iOS 18 Floating Frosted Glass Bottom Navigation Bar */}
+      {/* Bottom Frosted Dock */}
       <nav className="sticky bottom-0 z-20 bg-white/95 backdrop-blur-xl border-t border-slate-200/80 px-2 pb-safe pt-1.5">
         <div className="grid grid-cols-5 items-center max-w-md mx-auto">
           <button
@@ -427,7 +453,6 @@ export default function App() {
             <span>لیست خرید</span>
           </button>
 
-          {/* Elevated Central Camera Scanner FAB */}
           <div className="flex justify-center -mt-6">
             <button
               type="button"
@@ -458,7 +483,7 @@ export default function App() {
             }`}
           >
             <Server className="h-5 w-5" />
-            <span>سرور و اپ</span>
+            <span>مالکیت و اپ</span>
           </button>
         </div>
       </nav>
@@ -467,12 +492,22 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#EDF1F7]">
-      {/* Mobile / Full-Width Mode */}
       {!desktopPhoneFrame || isNative ? (
         <div className="mx-auto max-w-2xl min-h-screen bg-[#F4F6FA] shadow-xl flex flex-col">
           {!isNative && (
             <div className="hidden lg:flex items-center justify-between bg-slate-900 text-white px-5 py-2.5 text-xs">
-              <span className="font-bold">نمای وب‌اپلیکیشن تمام‌صفحه «خریدیـار»</span>
+              <div className="flex items-center gap-3">
+                <span className="font-bold">وب‌اپلیکیشن «خریدیـار» — اثر سعید سالاری</span>
+                <a
+                  href={OWNER_LINKEDIN_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-lg bg-[#0A66C2] px-2.5 py-1 font-bold hover:bg-[#004182]"
+                >
+                  <Linkedin className="h-3 w-3 fill-current" />
+                  LinkedIn
+                </a>
+              </div>
               <div className="flex items-center gap-2.5">
                 <a
                   href={apkDownloadUrl}
@@ -488,7 +523,7 @@ export default function App() {
                   className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-3 py-1 font-semibold hover:bg-white/25 cursor-pointer"
                 >
                   <Smartphone className="h-3.5 w-3.5" />
-                  نمای شبیه‌ساز موبایل + پنل سرور
+                  نمای موبایل + پنل معرفی
                 </button>
               </div>
             </div>
@@ -496,12 +531,11 @@ export default function App() {
           <div className="flex-1 flex flex-col">{mobileAppInner}</div>
         </div>
       ) : (
-        /* Responsive Showcase Layout: Mobile on <lg, Split Interactive Mobile Frame + Live Server & APK Studio on lg+ */
         <>
           <div className="lg:hidden min-h-screen flex flex-col">{mobileAppInner}</div>
 
           <div className="hidden lg:grid lg:grid-cols-12 gap-8 max-w-6xl mx-auto px-6 py-7 items-center min-h-screen">
-            {/* Right Column in RTL: Interactive Realistic Mobile Phone Bezel */}
+            {/* Interactive Mobile Phone Frame */}
             <div className="col-span-5 flex justify-center">
               <div className="w-[392px] h-[812px] rounded-[50px] bg-slate-900 p-3 shadow-[0_32px_70px_rgba(15,23,42,0.22)] ring-1 ring-slate-800/80 relative flex flex-col">
                 <div className="mx-auto mb-1.5 h-5 w-28 rounded-full bg-slate-950 shrink-0" />
@@ -511,22 +545,72 @@ export default function App() {
               </div>
             </div>
 
-            {/* Left Column in RTL: Server Auto-Connect Control Center, Live CV Trigger & Direct APK Download */}
-            <div className="col-span-7 space-y-5">
+            {/* Right-Hand Showcase + Founder Bio + LinkedIn + Download */}
+            <div className="col-span-7 space-y-4">
               <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-xs font-bold text-blue-700 shadow-2xs border border-slate-200/80">
                 <Wifi className="h-3.5 w-3.5 text-emerald-500" />
-                سیستم یکپارچه موبایل، وب، سرور بینایی ماشین و کلود خودکار
+                سامانه رسمی و عمومی «خریدیـار» — نسخه وب، PWA و اندروید Release
               </div>
 
               <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-snug">
                 اپلیکیشن هوشمند <span className="text-blue-600">«خریدیـار»</span>
-                <span className="block text-lg font-bold text-slate-600 mt-1">
-                  اسکن حرفه‌ای فاکتور با دوربین + تطبیق خودکار لیست خرید و تشخیص اقلام جامانده
+                <span className="block text-base font-bold text-slate-600 mt-1">
+                  اسکن حرفه‌ای فاکتور با بینایی ماشین، ثبت خودکار اقلام و چک‌لیست ضد فراموشی خرید
                 </span>
               </h1>
 
-              {/* Quick Interactive Live Test Buttons */}
-              <div className="rounded-3xl bg-white p-5 border border-slate-200/80 shadow-xs space-y-3.5">
+              {/* Executive Founder Bio & LinkedIn Direct Card on Desktop Hero */}
+              <div className="rounded-3xl bg-white p-5 border border-slate-200/80 shadow-xs space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <img
+                      src="https://avatars.githubusercontent.com/u/221086467?v=4"
+                      alt="سعید سالاری - Saeed Salari"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = assetUrl('icon-192.png');
+                      }}
+                      className="h-14 w-14 rounded-2xl object-cover border border-blue-200 bg-blue-50 shrink-0"
+                    />
+                    <div>
+                      <span className="text-[11px] font-extrabold text-blue-600">
+                        بنیان‌گذار، طراح و صاحب امتیاز اثر
+                      </span>
+                      <h2 className="text-base font-black text-slate-900">
+                        سعید سالاری <span className="text-xs font-bold text-slate-400">(Saeed Salari)</span>
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        مهندس نرم‌افزار فول‌استک • هوش مصنوعی، بینایی ماشین و معماری ابری
+                      </p>
+                    </div>
+                  </div>
+
+                  <a
+                    href={OWNER_LINKEDIN_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 inline-flex items-center gap-2 rounded-2xl bg-[#0A66C2] px-4 py-3 text-xs font-extrabold text-white shadow-sm hover:bg-[#004182] transition"
+                  >
+                    <Linkedin className="h-4 w-4 fill-current" />
+                    <span>پروفایل رسمی لینکدین</span>
+                    <ExternalLink className="h-3.5 w-3.5 opacity-85" />
+                  </a>
+                </div>
+
+                <p className="text-xs leading-relaxed text-slate-600 border-t border-slate-100 pt-2.5">
+                  تمامی حقوق مادی، معنوی، معماری فنی و هویت بصری اپلیکیشن «خریدیـار | KharidYar»
+                  محفوظ و متعلق به <strong>سعید سالاری</strong> می‌باشد.{' '}
+                  <button
+                    type="button"
+                    onClick={() => setAboutModalOpen(true)}
+                    className="font-bold text-blue-600 hover:underline cursor-pointer"
+                  >
+                    مشاهده کامل بیانیه مالکیت و حریم خصوصی ←
+                  </button>
+                </p>
+              </div>
+
+              {/* Instant Live CV Test Card */}
+              <div className="rounded-3xl bg-white p-5 border border-slate-200/80 shadow-xs space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
                     <ScanLine className="h-4.5 w-4.5 text-blue-600" />
@@ -538,7 +622,7 @@ export default function App() {
                     className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-200 cursor-pointer"
                   >
                     <Maximize2 className="h-3.5 w-3.5" />
-                    باز کردن نمای وب تمام‌صفحه
+                    نمای وب تمام‌صفحه
                   </button>
                 </div>
 
@@ -577,21 +661,14 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Direct Android APK Installer + Auto-Connect Mesh Card */}
+              {/* Signed Production Android Download + QR */}
               <div className="rounded-3xl bg-white p-5 border border-slate-200/80 shadow-xs flex items-center justify-between gap-5">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
+                <div className="space-y-2.5">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-700">
                     <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping" />
-                    <span className="text-xs font-extrabold text-emerald-700">
-                      سرور و دیتابیس ابری Supabase به صورت خودکار متصل و آماده همگام‌سازی با گوشی
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    فایل نصبی اندروید (<strong>KharidYar-v1.0.apk</strong>) بدون نیاز به هیچ تنظیم
-                    دستی آی‌پی، به محض باز شدن روی گوشی شما به سرور و دیتابیس ابری متصل می‌شود و
-                    فاکتورها و تیک‌های لیست خرید را زنده همگام‌سازی می‌کند:
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2.5">
+                    نسخه Release امضاشده رسمی اندروید (سازگار با Google Play Protect)
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2.5 pt-1">
                     <a
                       href={apkDownloadUrl}
                       download="KharidYar-v1.0.apk"
@@ -606,7 +683,7 @@ export default function App() {
                       className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-xs font-bold text-white hover:bg-slate-800 transition cursor-pointer"
                     >
                       <Camera className="h-4 w-4" />
-                      آپلود یا عکسبرداری فاکتور واقعی
+                      اسکن عکس فاکتور واقعی
                     </button>
                   </div>
                 </div>
@@ -616,10 +693,10 @@ export default function App() {
                     <img
                       src={sidebarQr}
                       alt="QR Code نصب اندروید"
-                      className="h-28 w-28 rounded-xl bg-white p-1"
+                      className="h-24 w-24 rounded-xl bg-white p-1"
                     />
-                    <span className="block mt-1.5 text-[10px] font-bold text-slate-600">
-                      اسکن با گوشی جهت دانلود APK
+                    <span className="block mt-1 text-[10px] font-bold text-slate-600">
+                      اسکن جهت نصب
                     </span>
                   </div>
                 )}
@@ -629,7 +706,7 @@ export default function App() {
         </>
       )}
 
-      {/* Full-Screen / Sheet Smart Computer Vision Scanner Modal */}
+      {/* Scanner Sheet Modal */}
       <ScannerModal
         isOpen={scannerOpen}
         initialSampleId={scannerSampleId}
@@ -644,6 +721,13 @@ export default function App() {
           setScannerSampleId(null);
         }}
         onConfirmSave={handleConfirmSaveReceipt}
+      />
+
+      {/* Official Creator Bio, Intellectual Property & Google Privacy Policy Modal */}
+      <AboutOwnerModal
+        isOpen={aboutModalOpen}
+        onClose={() => setAboutModalOpen(false)}
+        onClearAllUserData={handleClearAllUserData}
       />
     </div>
   );

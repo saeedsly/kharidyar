@@ -1,23 +1,24 @@
 {
   "name": "خریدیـار | همراه هوشمند خرید من",
   "short_name": "خریدیـار",
-  "description": "اسکن هوشمند فاکتور فروشگاهی با بینایی ماشین و تطبیق خودکار با لیست خرید",
+  "description": "اپلیکیشن هوشمند اسکن فاکتور فروشگاهی با بینایی ماشین و تطبیق خودکار با لیست خرید — اثر سعید سالاری",
   "lang": "fa",
   "dir": "rtl",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#F2F5F9",
   "theme_color": "#2563EB",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "./icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon-512.png",
+      "src": "./icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
