@@ -1,0 +1,52 @@
+{
+  "name": "kharidyar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "خریدیـار (KharidYar) — اپلیکیشن فول‌استک هوشمند اسکن فاکتور با بینایی ماشین و مدیریت لیست خرید",
+  "scripts": {
+    "prepare:assets": "node scripts/prepare-assets.mjs",
+    "dev:client": "vite --host 0.0.0.0 --port 5173",
+    "dev:server": "tsx server/index.ts",
+    "build": "node scripts/prepare-assets.mjs && vite build",
+    "cap:sync": "npm run build && npx cap sync android",
+    "start": "tsx server/index.ts"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/app": "^6.0.2",
+    "@capacitor/camera": "^6.1.2",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/haptics": "^6.0.2",
+    "@capacitor/status-bar": "^6.0.2",
+    "@supabase/supabase-js": "^2.49.1",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@tesseract.js-data/fas": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "framer-motion": "^12.4.7",
+    "lucide-react": "^0.475.0",
+    "multer": "^1.4.5-lts.1",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tesseract.js": "^7.0.0",
+    "vazirmatn": "^33.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0",
+    "@tailwindcss/vite": "^4.0.9",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.13.5",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.0.9",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vite": "^6.2.0"
+  }
+}

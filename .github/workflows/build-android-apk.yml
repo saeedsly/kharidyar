@@ -1,0 +1,57 @@
+name: Build KharidYar Android APK
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Install NPM Dependencies & Bundle Persian OCR Assets
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+
+      - name: Assemble Signed Installable Android APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../KharidYar-v1.0.apk
+
+      - name: Upload KharidYar APK Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KharidYar-Android-APK
+          path: KharidYar-v1.0.apk
+          if-no-files-found: error
+
+      - name: Publish Direct Download Release Asset (v1.0.0)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view v1.0.0 >/dev/null 2>&1 || gh release create v1.0.0 --title "خریدیـار نسخه ۱.۰ (Android APK)" --notes "نسخه نصبی اندروید اپلیکیشن هوشمند خریدیـار — مجهز به موتور بینایی ماشین فارسی، اسکنر فاکتور و تطبیق خودکار با لیست خرید."
+          gh release upload v1.0.0 KharidYar-v1.0.apk --clobber
