@@ -179,7 +179,7 @@ export async function runOnDeviceAutonomousScan(
   const [fasWorker, biWorker] = await withTimeout(
     Promise.all([
       createWorker('fas', 1, {
-        workerBlobURL: false,
+        workerBlobURL: true,
         workerPath: workerJsUrl,
         corePath: tessdataBaseUrl,
         langPath: tessdataBaseUrl,
@@ -194,7 +194,7 @@ export async function runOnDeviceAutonomousScan(
         },
       }),
       createWorker(['fas', 'eng'], 1, {
-        workerBlobURL: false,
+        workerBlobURL: true,
         workerPath: workerJsUrl,
         corePath: tessdataBaseUrl,
         langPath: tessdataBaseUrl,

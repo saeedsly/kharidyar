@@ -1,4 +1,4 @@
-name: Build Signed Release Android APK & Publish Public Web App
+name: Build Signed Release Android APK & Publish Global Cloud Web App
 
 on:
   push:
@@ -12,8 +12,8 @@ permissions:
   id-token: write
 
 jobs:
-  build-apk-and-aab:
-    name: Build Signed Production APK & Google Play AAB
+  build-and-publish-all:
+    name: Build Signed APK/AAB & Publish Global Web CDN
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -32,13 +32,63 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Install NPM Dependencies & Bundle Persian OCR Assets
+      - name: Build Production Web Bundle & Sync Capacitor Android
         run: |
           npm ci
           npm run build
+          cp dist/assets/index-*.css dist/app.css
+          cp dist/assets/index-*.js dist/app.js
           npx cap sync android
 
-      - name: Generate Official RSA-2048 Production Keystore & Build Signed APK + Play Store AAB
+      - name: Publish Web Bundle to Global Cloud HTTPS CDN
+        run: |
+          python3 - << 'PY'
+          import os, mimetypes, urllib.request
+
+          SUPABASE_URL = "https://gngrgkrypvrgcnkldbhx.supabase.co"
+          ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImduZ3Jna3J5cHZyZ2Nua2xkYmh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTkyNzEsImV4cCI6MjEwODI3NTI3MX0.uHp5_u0ASWy5P0BVjppDC1h4MdXJ-0KgqJl_JkwSMQI"
+
+          MIME_OVERRIDES = {
+              ".js": "application/javascript",
+              ".mjs": "application/javascript",
+              ".css": "text/css",
+              ".wasm": "application/wasm",
+              ".gz": "application/gzip",
+              ".woff2": "font/woff2",
+              ".png": "image/png",
+              ".jpg": "image/jpeg",
+              ".json": "application/json",
+              ".html": "text/html; charset=utf-8",
+          }
+
+          uploaded = 0
+          for root, _, files in os.walk("dist"):
+              for fname in files:
+                  full_path = os.path.join(root, fname)
+                  rel_path = os.path.relpath(full_path, "dist").replace("\\", "/")
+                  ext = os.path.splitext(fname)[1].lower()
+                  ctype = MIME_OVERRIDES.get(ext) or mimetypes.guess_type(fname)[0] or "application/octet-stream"
+                  with open(full_path, "rb") as f:
+                      body = f.read()
+                  req = urllib.request.Request(
+                      f"{SUPABASE_URL}/storage/v1/object/web-cdn/{rel_path}",
+                      data=body,
+                      method="POST",
+                      headers={
+                          "Authorization": f"Bearer {ANON_KEY}",
+                          "apikey": ANON_KEY,
+                          "Content-Type": ctype,
+                          "x-upsert": "true",
+                          "Cache-Control": "3600",
+                      },
+                  )
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      assert resp.status in (200, 201), f"Upload failed for {rel_path}: {resp.status}"
+                  uploaded += 1
+          print(f"Uploaded {uploaded} production files to Global Cloud CDN!")
+          PY
+
+      - name: Generate Official RSA-2048 Release Keystore & Assemble Signed APK + Play Store AAB
         working-directory: android
         run: |
           keytool -genkeypair -v \
@@ -64,7 +114,7 @@ jobs:
           APKSIGNER_BIN=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
           "$APKSIGNER_BIN" verify --print-certs ../KharidYar-v1.0.apk
 
-      - name: Upload Signed Android Artifacts
+      - name: Upload Signed Release Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: KharidYar-Signed-Release-Packages
@@ -82,46 +132,8 @@ jobs:
             --notes "طراحی، توسعه و مالکیت انحصاری اثر: سعید سالاری (Saeed Salari) — https://www.linkedin.com/in/saeed-salariy/"
           gh release upload v1.0.0 KharidYar-v1.0.apk KharidYar-PlayStore.aab --clobber
 
-  publish-public-web:
-    name: Deploy Public Web App (GitHub Pages Global HTTPS)
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Build Public Production Web Bundle
+      - name: Verify All Live Public Internet URLs Return HTTP 200
         run: |
-          npm ci
-          npm run build
-          cp dist/index.html dist/404.html
-          touch dist/.nojekyll
-
-      - name: Configure & Auto-Enable GitHub Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
-      - name: Upload Public Web Artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './dist'
-
-      - name: Deploy to GitHub Pages Global CDN
-        id: deployment
-        uses: actions/deploy-pages@v4
-
-      - name: Verify Live Public HTTPS URLs
-        run: |
-          echo "Deployed Live URL: ${{ steps.deployment.outputs.page_url }}"
-          sleep 4
-          curl -sI "${{ steps.deployment.outputs.page_url }}" | head -n 8
-          curl -sI "${{ steps.deployment.outputs.page_url }}privacy.html" | head -n 8
+          curl -fsSI "https://raw.githack.com/saeedsly/kharidyar/${{ github.ref_name }}/public/online.html" | head -n 5
+          curl -fsSI "https://raw.githack.com/saeedsly/kharidyar/${{ github.ref_name }}/public/privacy.html" | head -n 5
+          curl -fsSI "https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/app.js" | head -n 5
