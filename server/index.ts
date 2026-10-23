@@ -68,9 +68,9 @@ app.get('/api/health', (_req, res) => {
     apkSizeMb,
     apkDownloadUrl: apkFile
       ? '/api/download/apk'
-      : 'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-Universal.apk',
+      : 'https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/downloads/KharidYar-Android7-v1.4.1.apk',
     githubReleaseApkUrl:
-      'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-Universal.apk',
+      'https://github.com/saeedsly/kharidyar/releases/download/v1.4.1/KharidYar-Android7-v1.4.1.apk',
     timestamp: new Date().toISOString(),
   });
 });
@@ -80,13 +80,13 @@ app.get('/api/download/apk', (_req, res) => {
   const apkFile = getLocalApkPath();
   if (apkFile) {
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    res.setHeader('Content-Disposition', 'attachment; filename="KharidYar-v1.0.apk"');
+    res.setHeader('Content-Disposition', 'attachment; filename="KharidYar-Android7-v1.4.1.apk"');
     res.sendFile(apkFile);
     return;
   }
   res.redirect(
     302,
-    'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-Universal.apk'
+    'https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/downloads/KharidYar-Android7-v1.4.1.apk'
   );
 });
 

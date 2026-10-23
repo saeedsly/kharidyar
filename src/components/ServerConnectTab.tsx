@@ -131,7 +131,7 @@ export function ServerConnectTab({
 
           <a
             href={apkDownloadUrl}
-            download="KharidYar-v1.0.apk"
+            download="KharidYar-Android7-v1.4.1.apk"
             className="inline-flex items-center gap-1.5 rounded-2xl border border-blue-200 bg-blue-50 px-3.5 py-3 text-xs font-bold text-blue-700 hover:bg-blue-100 transition"
           >
             <Download className="h-4 w-4" />

@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-and-publish-all:
-    name: Build Signed APK/AAB & Publish Global Web CDN
+    name: Build Android 7 Compatible APK & Publish Global Web CDN
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -88,7 +88,7 @@ jobs:
           print(f"Uploaded {uploaded} production files to Global Cloud CDN!")
           PY
 
-      - name: Generate Official RSA-2048 Release Keystore & Assemble Universal Signed APK + Play Store AAB
+      - name: Build Aligned Android 7 Legacy APK, Modern APK & Play Store AAB
         working-directory: android
         run: |
           keytool -genkeypair -v \
@@ -110,8 +110,12 @@ jobs:
 
           ZIPALIGN_BIN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)
           APKSIGNER_BIN=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          APK_IN="app/build/outputs/apk/release/app-release.apk"
 
-          "$ZIPALIGN_BIN" -f -p 4 app/build/outputs/apk/release/app-release.apk ../KharidYar-Aligned.apk
+          # Both installers start from the same single, aligned (non-split) APK.
+          "$ZIPALIGN_BIN" -f -p 4 "$APK_IN" ../KharidYar-Aligned.apk
+
+          # Modern universal APK: v1 + v2 + v3 signatures.
           "$APKSIGNER_BIN" sign \
             --ks "$PWD/kharidyar-release.jks" \
             --ks-key-alias kharidyar_release \
@@ -120,34 +124,79 @@ jobs:
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
-            --out ../KharidYar-Universal.apk \
+            --out ../KharidYar-Universal-v1.4.1.apk \
             ../KharidYar-Aligned.apk
 
-          cp ../KharidYar-Universal.apk ../KharidYar-v1.0.apk
-          cp app/build/outputs/bundle/release/app-release.aab ../KharidYar-PlayStore.aab
+          # Legacy universal APK: JAR/v1 signature only. Some older vendor installers (Android 5.1-7) handle this path more reliably.
+          "$APKSIGNER_BIN" sign \
+            --ks "$PWD/kharidyar-release.jks" \
+            --ks-key-alias kharidyar_release \
+            --ks-pass pass:KharidYarSaeedSalari2026 \
+            --key-pass pass:KharidYarSaeedSalari2026 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled false \
+            --v3-signing-enabled false \
+            --out ../KharidYar-Android7-v1.4.1.apk \
+            ../KharidYar-Aligned.apk
 
-          "$APKSIGNER_BIN" verify -v --min-sdk-version 22 --print-certs ../KharidYar-Universal.apk
+          cp app/build/outputs/bundle/release/app-release.aab ../KharidYar-PlayStore-v1.4.1.aab
+
+          # Validate the old-Android APK using the v1 verification path, and validate the modern one separately.
+          "$APKSIGNER_BIN" verify -v --min-sdk-version 22 --max-sdk-version 23 --print-certs ../KharidYar-Android7-v1.4.1.apk
+          "$APKSIGNER_BIN" verify -v --min-sdk-version 24 --max-sdk-version 35 --print-certs ../KharidYar-Universal-v1.4.1.apk
+
+      - name: Publish Android 7 APK to Public HTTPS CDN
+        run: |
+          python3 - << 'PY'
+          import os, urllib.request
+
+          supabase_url = "https://gngrgkrypvrgcnkldbhx.supabase.co"
+          anon_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImduZ3Jna3J5cHZyZ2Nua2xkYmh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTkyNzEsImV4cCI6MjEwODI3NTI3MX0.uHp5_u0ASWy5P0BVjppDC1h4MdXJ-0KgqJl_JkwSMQI"
+          local_path = "KharidYar-Android7-v1.4.1.apk"
+          remote_path = "downloads/KharidYar-Android7-v1.4.1.apk"
+          with open(local_path, "rb") as f:
+              req = urllib.request.Request(
+                  f"{supabase_url}/storage/v1/object/web-cdn/{remote_path}",
+                  data=f.read(),
+                  method="POST",
+                  headers={
+                      "Authorization": f"Bearer {anon_key}",
+                      "apikey": anon_key,
+                      "Content-Type": "application/vnd.android.package-archive",
+                      "Content-Length": str(os.path.getsize(local_path)),
+                      "x-upsert": "true",
+                      "Cache-Control": "public, max-age=300",
+                  },
+              )
+          with urllib.request.urlopen(req, timeout=120) as resp:
+              print(f"Android 7 APK CDN upload: HTTP {resp.status}")
+              assert resp.status in (200, 201)
+          PY
 
       - name: Upload Signed Release Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: KharidYar-Signed-Release-Packages
+          name: KharidYar-Android-Release-v1.4.1
           path: |
-            KharidYar-Universal.apk
-            KharidYar-v1.0.apk
-            KharidYar-PlayStore.aab
+            KharidYar-Android7-v1.4.1.apk
+            KharidYar-Universal-v1.4.1.apk
+            KharidYar-PlayStore-v1.4.1.aab
           if-no-files-found: error
 
-      - name: Publish Signed APK & Google Play AAB to Public Release (v1.0.0)
+      - name: Publish Signed Packages to Public Release (v1.4.1)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view v1.0.0 >/dev/null 2>&1 || gh release create v1.0.0 \
-            --title "خریدیـار (KharidYar) — نسخه رسمی امضاشده اندروید و Google Play" \
-            --notes "طراحی، توسعه و مالکیت انحصاری اثر: سعید سالاری (Saeed Salari) — https://www.linkedin.com/in/saeed-salariy/"
-          gh release upload v1.0.0 KharidYar-Universal.apk KharidYar-v1.0.apk KharidYar-PlayStore.aab --clobber
+          gh release view v1.4.1 >/dev/null 2>&1 || gh release create v1.4.1 \
+            --title "خریدیـار 1.4.1 — نصب سازگار با اندروید 7 و بالاتر" \
+            --notes "نسخه تست نصب اندروید: Android 7 legacy APK با امضای v1، نسخه Universal مدرن با v1/v2/v3، و فایل AAB. صاحب اثر: سعید سالاری."
+          gh release upload v1.4.1 \
+            KharidYar-Android7-v1.4.1.apk \
+            KharidYar-Universal-v1.4.1.apk \
+            KharidYar-PlayStore-v1.4.1.aab --clobber
 
-      - name: Verify All Live Public Internet URLs Return HTTP 200
+      - name: Verify Public Download URLs
         run: |
-          curl -fsSI "https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-Universal.apk" | head -n 5
+          curl -fsSI "https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/downloads/KharidYar-Android7-v1.4.1.apk" | head -n 5
+          curl -fsSI "https://github.com/saeedsly/kharidyar/releases/download/v1.4.1/KharidYar-Android7-v1.4.1.apk" | head -n 5
           curl -fsSI "https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/app.js" | head -n 5
