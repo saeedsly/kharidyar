@@ -120,11 +120,11 @@ export function DashboardTab({
 
           <button
             type="button"
-            onClick={() => onOpenScanner('ofogh')}
+            onClick={() => onOpenScanner('ofogh-real')}
             className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-200/80 active:scale-[0.99] cursor-pointer"
           >
             <Sparkles className="h-4 w-4 text-blue-600" />
-            تست زنده اسکنر هوشمند
+            تست فاکتور افق کوروش شما
           </button>
         </div>
       </motion.div>

@@ -88,7 +88,7 @@ jobs:
           print(f"Uploaded {uploaded} production files to Global Cloud CDN!")
           PY
 
-      - name: Generate Official RSA-2048 Release Keystore & Assemble Signed APK + Play Store AAB
+      - name: Generate Official RSA-2048 Release Keystore & Assemble Universal Signed APK + Play Store AAB
         working-directory: android
         run: |
           keytool -genkeypair -v \
@@ -108,17 +108,32 @@ jobs:
             -PKHARIDYAR_KEY_ALIAS=kharidyar_release \
             -PKHARIDYAR_KEY_PASSWORD=KharidYarSaeedSalari2026
 
-          cp app/build/outputs/apk/release/app-release.apk ../KharidYar-v1.0.apk
+          ZIPALIGN_BIN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)
+          APKSIGNER_BIN=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+
+          "$ZIPALIGN_BIN" -f -p 4 app/build/outputs/apk/release/app-release.apk ../KharidYar-Aligned.apk
+          "$APKSIGNER_BIN" sign \
+            --ks "$PWD/kharidyar-release.jks" \
+            --ks-key-alias kharidyar_release \
+            --ks-pass pass:KharidYarSaeedSalari2026 \
+            --key-pass pass:KharidYarSaeedSalari2026 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out ../KharidYar-Universal.apk \
+            ../KharidYar-Aligned.apk
+
+          cp ../KharidYar-Universal.apk ../KharidYar-v1.0.apk
           cp app/build/outputs/bundle/release/app-release.aab ../KharidYar-PlayStore.aab
 
-          APKSIGNER_BIN=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
-          "$APKSIGNER_BIN" verify --print-certs ../KharidYar-v1.0.apk
+          "$APKSIGNER_BIN" verify -v --min-sdk-version 22 --print-certs ../KharidYar-Universal.apk
 
       - name: Upload Signed Release Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: KharidYar-Signed-Release-Packages
           path: |
+            KharidYar-Universal.apk
             KharidYar-v1.0.apk
             KharidYar-PlayStore.aab
           if-no-files-found: error
@@ -130,10 +145,9 @@ jobs:
           gh release view v1.0.0 >/dev/null 2>&1 || gh release create v1.0.0 \
             --title "خریدیـار (KharidYar) — نسخه رسمی امضاشده اندروید و Google Play" \
             --notes "طراحی، توسعه و مالکیت انحصاری اثر: سعید سالاری (Saeed Salari) — https://www.linkedin.com/in/saeed-salariy/"
-          gh release upload v1.0.0 KharidYar-v1.0.apk KharidYar-PlayStore.aab --clobber
+          gh release upload v1.0.0 KharidYar-Universal.apk KharidYar-v1.0.apk KharidYar-PlayStore.aab --clobber
 
       - name: Verify All Live Public Internet URLs Return HTTP 200
         run: |
-          curl -fsSI "https://raw.githack.com/saeedsly/kharidyar/${{ github.ref_name }}/public/online.html" | head -n 5
-          curl -fsSI "https://raw.githack.com/saeedsly/kharidyar/${{ github.ref_name }}/public/privacy.html" | head -n 5
+          curl -fsSI "https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-Universal.apk" | head -n 5
           curl -fsSI "https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/app.js" | head -n 5

@@ -9,6 +9,7 @@ import {
   fuseDualHeadLines,
   parsePersianReceiptText,
   type NeuralLineInput,
+  type ThermalNumericRow,
 } from '../src/lib/persianMatcher';
 
 const execFileAsync = promisify(execFile);
@@ -52,6 +53,7 @@ export interface OpenCvResult {
   perspectiveCropped: boolean;
   detectedLineCount: number;
   lineBoxes: BoundingBox[];
+  thermalRows?: ThermalNumericRow[];
   outputPath: string;
 }
 
@@ -78,11 +80,14 @@ export async function analyzeReceiptWithComputerVision(inputImagePath: string, e
     console.warn('[CV] Python OpenCV fallback to raw image:', err);
   }
 
-  // Step 2: Dual-Head Neural LSTM OCR (`fas` lexical head + `fas+eng` numeric precision head) in parallel!
+  // Step 2: Neural LSTM OCR (`fas` lexical head + optional `fas+eng` numeric head if thermal rows not pre-extracted)
   const { fasWorker, biWorker } = await getOcrWorkers();
+  const hasThermalRows = (cvMeta?.thermalRows?.length || 0) >= 2;
   const [fasRes, biRes] = await Promise.all([
     fasWorker.recognize(imageForOcr, {}, { blocks: true }),
-    biWorker.recognize(imageForOcr, {}, { blocks: true }),
+    hasThermalRows
+      ? Promise.resolve(null)
+      : biWorker.recognize(imageForOcr, {}, { blocks: true }),
   ]);
 
   const imgW = cvMeta?.processedSize.width || 1500;
@@ -91,7 +96,7 @@ export async function analyzeReceiptWithComputerVision(inputImagePath: string, e
   const fasLinesRaw =
     fasRes.data.blocks?.flatMap((b) => b.paragraphs.flatMap((p) => p.lines)) || [];
   const biLinesRaw =
-    biRes.data.blocks?.flatMap((b) => b.paragraphs.flatMap((p) => p.lines)) || [];
+    biRes?.data.blocks?.flatMap((b) => b.paragraphs.flatMap((p) => p.lines)) || [];
 
   const neuralBoxes: BoundingBox[] = [];
   const pairedLines: NeuralLineInput[] = [];
@@ -129,7 +134,7 @@ export async function analyzeReceiptWithComputerVision(inputImagePath: string, e
     }
   } else {
     const rawSplit = (fasRes.data.text || '').split(/\r?\n/);
-    const biSplit = (biRes.data.text || '').split(/\r?\n/);
+    const biSplit = (biRes?.data.text || '').split(/\r?\n/);
     rawSplit.forEach((ft, i) => {
       pairedLines.push({
         fasText: ft,
@@ -140,8 +145,10 @@ export async function analyzeReceiptWithComputerVision(inputImagePath: string, e
   }
 
   // Step 3: Fuse Persian lexical tokens + exact comma-grouped numbers & self-healing arithmetic check
-  const fusedLines = fuseDualHeadLines(pairedLines);
-  const avgConfidence = ((fasRes.data.confidence || 84) + (biRes.data.confidence || 88)) / 2;
+  const fusedLines = fuseDualHeadLines(pairedLines, cvMeta?.thermalRows || []);
+  const avgConfidence = biRes
+    ? ((fasRes.data.confidence || 84) + (biRes.data.confidence || 88)) / 2
+    : fasRes.data.confidence || 90;
   const parsedReceipt = parsePersianReceiptText(fusedLines, neuralBoxes, avgConfidence);
 
   const durationMs = Date.now() - startedAt;

@@ -50,6 +50,12 @@ interface ScannerModalProps {
 
 const BUILTIN_SAMPLES = [
   {
+    id: 'ofogh-real',
+    title: 'فاکتور واقعی شما: فروشگاه افق کوروش (مشهد معلم ۴۹)',
+    desc: '۶ قلم واقعی (سینه مرغ، روغن اویلا، بوشار لینا، بیسکویت کوپا، سان استار، ساندیس)',
+    thumb: 'samples/sample-ofogh-real.jpg',
+  },
+  {
     id: 'ofogh',
     title: 'نمونه ۱: فروشگاه افق کوروش',
     desc: '۵ قلم منطبق با لیست خرید + ۲ قلم جا مانده (تست هوشمند هشدار)',
@@ -103,6 +109,7 @@ export function ScannerModal({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   const targetShoppingItems = allShoppingItems.filter((i) => i.list_id === activeListId);
 
@@ -131,12 +138,14 @@ export function ScannerModal({
 
   const startLiveWebCamera = async () => {
     setCameraError(null);
+    // On native Android APK, use hardware Camera directly (with full autofocus & flash, no Google Photos picker!)
     if (Capacitor.isNativePlatform()) {
       try {
         const photo = await CapCamera.getPhoto({
-          quality: 90,
+          quality: 92,
           width: 1600,
           allowEditing: false,
+          correctOrientation: true,
           resultType: CameraResultType.DataUrl,
           source: CameraSource.Camera,
         });
@@ -150,6 +159,10 @@ export function ScannerModal({
     }
 
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        cameraInputRef.current?.click();
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
@@ -167,9 +180,7 @@ export function ScannerModal({
         }
       });
     } catch {
-      setCameraError(
-        'دسترسی مستقیم به وب‌کم فعال نشد؛ از دکمه «انتخاب از گالری / فایل» برای آپلود عکس فاکتور استفاده کنید.'
-      );
+      cameraInputRef.current?.click();
     }
   };
 
@@ -182,29 +193,13 @@ export function ScannerModal({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     stopCameraStream();
     await executeScan({ dataUrl });
   };
 
-  const pickFromGallery = async () => {
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const photo = await CapCamera.getPhoto({
-          quality: 90,
-          width: 1600,
-          allowEditing: false,
-          resultType: CameraResultType.DataUrl,
-          source: CameraSource.Photos,
-        });
-        if (photo.dataUrl) {
-          await executeScan({ dataUrl: photo.dataUrl });
-        }
-        return;
-      } catch (err: any) {
-        if (String(err?.message || '').toLowerCase().includes('cancel')) return;
-      }
-    }
+  const pickFromGallery = () => {
+    setCameraError(null);
     fileInputRef.current?.click();
   };
 
@@ -244,13 +239,13 @@ export function ScannerModal({
     }
   };
 
-  // One-tap Rial <-> Toman converter (÷10 or ×10) if user wants to switch currency unit!
   const scaleAllPrices = (factor: number) => {
     setItems((prev) =>
       prev.map((it) => ({
         ...it,
         unit_price: Math.round(it.unit_price * factor),
         total_price: Math.round(it.total_price * factor),
+        discount: Math.round((it.discount || 0) * factor),
       }))
     );
     setDiscountTotal((d) => Math.round(d * factor));
@@ -404,17 +399,32 @@ export function ScannerModal({
                         className="flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-slate-50 border-2 border-dashed border-slate-300 p-6 text-slate-800 hover:border-blue-500 hover:bg-blue-50/30 transition cursor-pointer"
                       >
                         <ImagePlus className="h-8 w-8 text-blue-600" />
-                        <span className="text-sm font-extrabold">انتخاب از گالری / فایل</span>
+                        <span className="text-sm font-extrabold">انتخاب از گالری / فایل گوشی</span>
                         <span className="text-[11px] text-slate-500">
-                          فشرده‌سازی خودکار و خوانش سریع
+                          انتخاب مستقیم از حافظه بدون سرویس خارجی
                         </span>
                       </button>
                     </div>
 
+                    {/* Standard file input for gallery/files (no Google cloud service) */}
                     <input
                       ref={fileInputRef}
                       type="file"
+                      accept="image/jpeg,image/png,image/webp,image/*"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (f) void executeScan({ file: f });
+                      }}
+                      className="hidden"
+                    />
+
+                    {/* Direct hardware camera input fallback */}
+                    <input
+                      ref={cameraInputRef}
+                      type="file"
                       accept="image/*"
+                      capture="environment"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         e.target.value = '';
@@ -735,6 +745,7 @@ export function ScannerModal({
                       const matchedInList = liveReconciliation.items.some(
                         (r) => r.matchedReceiptItemIndex === idx
                       );
+                      const rowPayable = Math.max(0, (it.total_price || 0) - (it.discount || 0));
                       return (
                         <div
                           key={idx}
@@ -810,6 +821,13 @@ export function ScannerModal({
                               </div>
                             </div>
                           </div>
+
+                          {it.discount > 0 && (
+                            <div className="flex items-center justify-between rounded-xl bg-emerald-50/90 border border-emerald-200/70 px-2.5 py-1 text-[11px] font-bold text-emerald-800 tabular-fa">
+                              <span>تخفیف ردیف: {formatToman(it.discount)}</span>
+                              <span>قابل پرداخت: {formatToman(rowPayable)}</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -817,11 +835,11 @@ export function ScannerModal({
 
                   <div className="rounded-2xl bg-slate-50 p-3.5 space-y-2 text-xs tabular-fa border border-slate-200/60">
                     <div className="flex justify-between text-slate-600">
-                      <span>جمع کل اقلام:</span>
+                      <span>جمع کل قبل از تخفیف:</span>
                       <span className="font-bold">{formatToman(liveSubtotal)}</span>
                     </div>
                     <div className="flex items-center justify-between text-emerald-700">
-                      <span>تخفیف فاکتور (تومان):</span>
+                      <span>سود شما از خرید (تخفیف کل):</span>
                       <input
                         type="number"
                         step={1000}
@@ -831,7 +849,7 @@ export function ScannerModal({
                       />
                     </div>
                     <div className="flex justify-between border-t border-slate-200 pt-2 text-sm font-extrabold text-slate-900">
-                      <span>مبلغ قابل پرداخت:</span>
+                      <span>مبلغ قابل پرداخت نهایی:</span>
                       <span className="text-blue-600">{formatToman(liveGrandTotal)}</span>
                     </div>
                   </div>

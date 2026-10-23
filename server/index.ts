@@ -68,9 +68,9 @@ app.get('/api/health', (_req, res) => {
     apkSizeMb,
     apkDownloadUrl: apkFile
       ? '/api/download/apk'
-      : 'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-v1.0.apk',
+      : 'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-Universal.apk',
     githubReleaseApkUrl:
-      'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-v1.0.apk',
+      'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-Universal.apk',
     timestamp: new Date().toISOString(),
   });
 });
@@ -86,7 +86,7 @@ app.get('/api/download/apk', (_req, res) => {
   }
   res.redirect(
     302,
-    'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-v1.0.apk'
+    'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-Universal.apk'
   );
 });
 
@@ -145,8 +145,10 @@ app.post('/api/scan', upload.single('receipt'), async (req, res) => {
       inputPath = req.file.path;
       publicOriginalUrl = `/uploads/${path.basename(req.file.path)}`;
     } else if (req.body?.sampleId || req.body?.samplePath) {
-      const cleanRel = String(req.body.samplePath || `/samples/sample-${req.body.sampleId}.png`)
-        .replace(/^\/+/, '');
+      const sid = String(req.body.sampleId || 'ofogh');
+      const defaultSampleRel =
+        sid === 'ofogh-real' ? '/samples/sample-ofogh-real.jpg' : `/samples/sample-${sid}.png`;
+      const cleanRel = String(req.body.samplePath || defaultSampleRel).replace(/^\/+/, '');
       const candidate = path.resolve(PUBLIC_DIR, cleanRel);
       if (!candidate.startsWith(PUBLIC_DIR) || !fs.existsSync(candidate)) {
         res.status(400).json({ ok: false, error: 'فایل نمونه فاکتور یافت نشد' });

@@ -46,7 +46,7 @@ import { AboutOwnerModal, OWNER_LINKEDIN_URL } from './components/AboutOwnerModa
 type TabKey = 'dashboard' | 'list' | 'receipts' | 'connect';
 
 const GITHUB_RELEASE_APK_URL =
-  'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-v1.0.apk';
+  'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-Universal.apk';
 
 export default function App() {
   const isNative = Capacitor.isNativePlatform();
@@ -509,21 +509,13 @@ export default function App() {
                 </a>
               </div>
               <div className="flex items-center gap-2.5">
-                <a
-                  href={apkDownloadUrl}
-                  download="KharidYar-v1.0.apk"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1 font-bold hover:bg-blue-500"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  دانلود APK اندروید
-                </a>
                 <button
                   type="button"
                   onClick={() => setDesktopPhoneFrame(true)}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-3 py-1 font-semibold hover:bg-white/25 cursor-pointer"
                 >
                   <Smartphone className="h-3.5 w-3.5" />
-                  نمای موبایل + پنل معرفی
+                  نمای موبایل
                 </button>
               </div>
             </div>
@@ -629,77 +621,36 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => openScanner('ofogh')}
+                    onClick={() => openScanner('ofogh-real')}
                     className="flex items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50/60 p-3.5 text-right hover:bg-blue-100/70 transition cursor-pointer"
                   >
                     <Sparkles className="h-6 w-6 text-blue-600 shrink-0" />
                     <div>
                       <p className="text-xs font-extrabold text-slate-900">
-                        اسکن زنده فاکتور افق کوروش
+                        اسکن فاکتور واقعی افق کوروش شما
                       </p>
                       <p className="text-[11px] text-slate-600 mt-0.5">
-                        تیک خوردن ۵ قلم + هشدار ۲ قلم جامانده!
+                        ۶ قلم واقعی با تشخیص خودکار تخفیف و جمع
                       </p>
                     </div>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => openScanner('janbo')}
+                    onClick={() => openScanner()}
                     className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 text-right hover:bg-emerald-100/70 transition cursor-pointer"
                   >
-                    <CheckCircle2 className="h-6 w-6 text-emerald-600 shrink-0" />
+                    <Camera className="h-6 w-6 text-emerald-600 shrink-0" />
                     <div>
                       <p className="text-xs font-extrabold text-slate-900">
-                        اسکن فاکتور تکمیلی جانبو
+                        آپلود یا عکسبرداری فاکتور جدید
                       </p>
                       <p className="text-[11px] text-slate-600 mt-0.5">
-                        تکمیل روغن مایع و گوجه فرنگی جامانده
+                        انتخاب مستقیم عکس از گالری یا دوربین
                       </p>
                     </div>
                   </button>
                 </div>
-              </div>
-
-              {/* Signed Production Android Download + QR */}
-              <div className="rounded-3xl bg-white p-5 border border-slate-200/80 shadow-xs flex items-center justify-between gap-5">
-                <div className="space-y-2.5">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-700">
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping" />
-                    نسخه Release امضاشده رسمی اندروید (سازگار با Google Play Protect)
-                  </span>
-                  <div className="flex flex-wrap items-center gap-2.5 pt-1">
-                    <a
-                      href={apkDownloadUrl}
-                      download="KharidYar-v1.0.apk"
-                      className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-xs font-extrabold text-white shadow-sm shadow-blue-600/25 hover:bg-blue-700 transition"
-                    >
-                      <Download className="h-4 w-4" />
-                      دانلود مستقیم فایل نصب اندروید (APK)
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => openScanner()}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-xs font-bold text-white hover:bg-slate-800 transition cursor-pointer"
-                    >
-                      <Camera className="h-4 w-4" />
-                      اسکن عکس فاکتور واقعی
-                    </button>
-                  </div>
-                </div>
-
-                {sidebarQr && (
-                  <div className="shrink-0 text-center bg-slate-50 border border-slate-200 rounded-2xl p-3">
-                    <img
-                      src={sidebarQr}
-                      alt="QR Code نصب اندروید"
-                      className="h-24 w-24 rounded-xl bg-white p-1"
-                    />
-                    <span className="block mt-1 text-[10px] font-bold text-slate-600">
-                      اسکن جهت نصب
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
           </div>

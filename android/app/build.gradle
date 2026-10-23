@@ -4,11 +4,11 @@ android {
     namespace "com.saeedsalari.kharidyar"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.saeedsalari.kharidyar"
+        applicationId "com.saeedsalari.kharidyar.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.2.0"
+        versionCode 4
+        versionName "1.4.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
@@ -23,6 +23,7 @@ android {
                 keyPassword project.property('KHARIDYAR_KEY_PASSWORD')
                 v1SigningEnabled true
                 v2SigningEnabled true
+                enableV3Signing true
             }
         }
     }
@@ -35,6 +36,11 @@ android {
                 signingConfig signingConfigs.release
             }
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
         }
     }
 }
