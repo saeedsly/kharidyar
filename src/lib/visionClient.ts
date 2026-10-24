@@ -1,4 +1,5 @@
 import { createWorker, type Worker } from 'tesseract.js';
+import { Capacitor } from '@capacitor/core';
 import type { BoundingBox, ScanResponse, ShoppingItem } from '../types';
 import { assetUrl } from './assetUrl';
 import {
@@ -47,28 +48,36 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('خطا در خواندن فایل تصویر از حافظه گوشی'));
-    reader.readAsDataURL(blob);
-  });
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Android 7-era WebViews have small heaps and much slower WASM execution. */
+function isLowPowerAndroid(): boolean {
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  const androidMatch = userAgent.match(/Android\s+(\d+(?:\.\d+)?)/i);
+  const isAndroid = Capacitor.getPlatform() === 'android' || Boolean(androidMatch);
+  if (!isAndroid) return false;
+  const major = androidMatch ? Number(androidMatch[1].split('.')[0]) : 0;
+  const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 0 : 0;
+  const deviceMemory = Number((navigator as Navigator & { deviceMemory?: number })?.deviceMemory || 0);
+  return (major > 0 && major <= 7) || (cores > 0 && cores <= 4) || (deviceMemory > 0 && deviceMemory <= 2);
 }
 
 export async function normalizeAndCompressReceiptPhoto(
   source: File | Blob | string
 ): Promise<{ compressedFile: File; previewDataUrl: string; width: number; height: number }> {
   let srcUrl = '';
+  let temporaryObjectUrl = false;
   if (typeof source === 'string') {
     srcUrl = source;
   } else {
-    try {
-      srcUrl = await blobToDataUrl(source);
-    } catch {
-      srcUrl = URL.createObjectURL(source);
-    }
+    // Keep large gallery photos as Blob URLs instead of turning the full-resolution file into
+    // a base64 string first. Base64 duplicates camera memory and can kill older Android WebViews.
+    srcUrl = URL.createObjectURL(source);
+    temporaryObjectUrl = true;
   }
+  const lowPowerAndroid = isLowPowerAndroid();
 
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -81,6 +90,7 @@ export async function normalizeAndCompressReceiptPhoto(
       el.src = srcUrl;
     });
 
+    // Keep enough pixels for the tiny dot-matrix prices; reduce JPEG quality, not receipt detail.
     const maxW = 1500;
     const maxH = 2667;
     let w = img.naturalWidth || img.width;
@@ -90,6 +100,7 @@ export async function normalizeAndCompressReceiptPhoto(
       w = Math.round(w * ratio);
       h = Math.round(h * ratio);
     }
+    const jpegQuality = lowPowerAndroid ? 0.82 : 0.9;
 
     const canvas = document.createElement('canvas');
     canvas.width = w;
@@ -100,12 +111,12 @@ export async function normalizeAndCompressReceiptPhoto(
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(img, 0, 0, w, h);
 
-    const previewDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    const previewDataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
         (b) => (b ? resolve(b) : reject(new Error('خطا در فشرده‌سازی تصویر'))),
         'image/jpeg',
-        0.9
+        jpegQuality
       );
     });
 
@@ -115,19 +126,23 @@ export async function normalizeAndCompressReceiptPhoto(
 
     return { compressedFile, previewDataUrl, width: w, height: h };
   } finally {
-    if (srcUrl.startsWith('blob:')) {
+    if (temporaryObjectUrl) {
       URL.revokeObjectURL(srcUrl);
     }
   }
 }
 
-async function enhanceImageOnCanvas(dataUrl: string): Promise<{
+async function enhanceImageOnCanvas(
+  dataUrl: string,
+  onProgress?: (stage: string, pct: number) => void
+): Promise<{
   enhancedDataUrl: string;
   ocrDataUrl: string;
   width: number;
   height: number;
   ocrWidth: number;
   ocrHeight: number;
+  sourceYScale: number;
   thermalRows: ThermalNumericRow[];
 }> {
   return new Promise((resolve, reject) => {
@@ -135,7 +150,17 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
     if (dataUrl.startsWith('http://') || dataUrl.startsWith('https://')) {
       img.crossOrigin = 'anonymous';
     }
-    img.onload = () => {
+    img.onload = async () => {
+      try {
+      const lowPowerAndroid = isLowPowerAndroid();
+      // Thermal prices need their original dot detail; the optimized extractor is now fast enough
+      // to keep the full 1500px receipt width even on legacy Android.
+      const processMaxW = 1500;
+      const processMaxH = 2667;
+      const jpegQuality = lowPowerAndroid ? 0.82 : 0.9;
+      onProgress?.('کوچک‌سازی هوشمند عکس برای جلوگیری از پرشدن حافظه گوشی...', 20);
+      await yieldToUi();
+
       // Step 0: Detect & auto-crop dark table/background margins on left/right of bright receipt paper
       const probeW = Math.min(480, img.width);
       const probeH = Math.max(120, Math.round((img.height * probeW) / img.width));
@@ -185,14 +210,14 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
         }
       }
 
-      const targetW = 1500;
-      const scale = targetW / cropW;
-      const w = targetW;
+      const maxScale = lowPowerAndroid ? 1.15 : 1.6;
+      const scale = Math.min(processMaxW / cropW, processMaxH / cropH, maxScale);
+      const w = Math.max(1, Math.round(cropW * scale));
       const h = Math.max(200, Math.round(cropH * scale));
       const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) {
         resolve({
           enhancedDataUrl: dataUrl,
@@ -201,6 +226,7 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
           height: img.height,
           ocrWidth: img.width,
           ocrHeight: img.height,
+          sourceYScale: 1,
           thermalRows: [],
         });
         return;
@@ -209,10 +235,20 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
       const imgData = ctx.getImageData(0, 0, w, h);
       const d = imgData.data;
 
-      // Use Red channel biased luminance (removes warm yellow room lighting on thermal paper)
+      // Use Red channel biased luminance (removes warm yellow room lighting on thermal paper).
+      // Yield periodically so an Android 7 WebView can keep painting progress instead of appearing hung.
       const lumArr = new Uint8Array(w * h);
-      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-        lumArr[p] = Math.round(0.55 * d[i] + 0.35 * d[i + 1] + 0.1 * d[i + 2]);
+      for (let y = 0; y < h; y++) {
+        const pixelRow = y * w;
+        const dataRow = pixelRow * 4;
+        for (let x = 0; x < w; x++) {
+          const i = dataRow + x * 4;
+          lumArr[pixelRow + x] = Math.round(0.55 * d[i] + 0.35 * d[i + 1] + 0.1 * d[i + 2]);
+        }
+        if (lowPowerAndroid && y > 0 && y % 96 === 0) {
+          onProgress?.('بهینه‌سازی نور و کنتراست فاکتور...', 22 + Math.round((y / h) * 4));
+          await yieldToUi();
+        }
       }
 
       // Fast coarse illumination background grid (32x32 tiles) to flatten hand/phone shadows
@@ -236,6 +272,10 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
           }
           gridBg[gy * gw + gx] = maxV;
         }
+        if (lowPowerAndroid && gy > 0 && gy % 8 === 0) {
+          onProgress?.('حذف سایه‌های میز از روی فاکتور...', 27);
+          await yieldToUi();
+        }
       }
 
       const normArr = new Uint8Array(w * h);
@@ -249,6 +289,10 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
           const v = Math.min(255, Math.round((lumArr[rowOff + x] * 255) / bgV));
           normArr[rowOff + x] = v;
           hist[v]++;
+        }
+        if (lowPowerAndroid && y > 0 && y % 96 === 0) {
+          onProgress?.('بهبود کنتراست خطوط چاپ حرارتی...', 31 + Math.round((y / h) * 5));
+          await yieldToUi();
         }
       }
 
@@ -264,43 +308,67 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
       const span = Math.max(25, pHigh - pLow);
 
       const stretchedGray = new Uint8Array(w * h);
-      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-        const stretched = Math.max(0, Math.min(255, Math.round(((normArr[p] - pLow) * 255) / span)));
-        stretchedGray[p] = stretched;
-        d[i] = stretched;
-        d[i + 1] = stretched;
-        d[i + 2] = stretched;
+      for (let y = 0; y < h; y++) {
+        const pixelRow = y * w;
+        const dataRow = pixelRow * 4;
+        for (let x = 0; x < w; x++) {
+          const p = pixelRow + x;
+          const i = dataRow + x * 4;
+          const stretched = Math.max(0, Math.min(255, Math.round(((normArr[p] - pLow) * 255) / span)));
+          stretchedGray[p] = stretched;
+          d[i] = stretched;
+          d[i + 1] = stretched;
+          d[i + 2] = stretched;
+        }
+        if (lowPowerAndroid && y > 0 && y % 96 === 0) {
+          onProgress?.('آماده‌سازی تصویر برای خواندن نام کالاها...', 37 + Math.round((y / h) * 5));
+          await yieldToUi();
+        }
       }
       ctx.putImageData(imgData, 0, 0);
 
-      // Extract exact thermal numeric rows directly on the 1500px grayscale buffer!
+      onProgress?.('استخراج ارقام حرارتی فاکتور...', 43);
+      await yieldToUi();
       const { thermalRows } = extractThermalRowsFromGrayscale(stretchedGray, w, h);
 
-      const enhancedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      const enhancedDataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
 
-      // Downscale slightly for mobile WASM OCR if image is very tall so recognition finishes in ~3s
-      const ocrMaxDim = 1350;
-      if (h > ocrMaxDim || w > ocrMaxDim) {
-        const r = Math.min(ocrMaxDim / w, ocrMaxDim / h);
-        const ow = Math.round(w * r);
-        const oh = Math.round(h * r);
-        const ocrCanvas = document.createElement('canvas');
-        ocrCanvas.width = ow;
-        ocrCanvas.height = oh;
-        const octx = ocrCanvas.getContext('2d');
-        if (octx) {
-          octx.drawImage(canvas, 0, 0, ow, oh);
-          resolve({
-            enhancedDataUrl,
-            ocrDataUrl: ocrCanvas.toDataURL('image/jpeg', 0.9),
-            width: w,
-            height: h,
-            ocrWidth: ow,
-            ocrHeight: oh,
-            thermalRows,
-          });
-          return;
-        }
+      // Thermal receipts contain a long footer of loyalty/marketing text. OCR only needs the
+      // store/date header and product rows; the exact total is already extracted geometrically.
+      // Cropping the unused footer cuts OCR work substantially on slow phones without reducing text size.
+      const itemRows = thermalRows.filter((row) => row.type === 'item_prices');
+      const lastItemY = itemRows.length ? itemRows[itemRows.length - 1].yNorm : 1;
+      const sourceYScale = itemRows.length >= 2 ? Math.min(0.84, Math.max(0.62, lastItemY + 0.07)) : 1;
+      const cropHeight = Math.max(200, Math.min(h, Math.round(h * sourceYScale)));
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = w;
+      cropCanvas.height = cropHeight;
+      const cropCtx = cropCanvas.getContext('2d');
+      if (cropCtx) {
+        cropCtx.drawImage(canvas, 0, 0, w, cropHeight, 0, 0, w, cropHeight);
+      }
+
+      const ocrMaxDim = lowPowerAndroid ? 1600 : 1350;
+      const ocrScale = Math.min(1, ocrMaxDim / Math.max(w, cropHeight));
+      const ow = Math.max(1, Math.round(w * ocrScale));
+      const oh = Math.max(1, Math.round(cropHeight * ocrScale));
+      const ocrCanvas = document.createElement('canvas');
+      ocrCanvas.width = ow;
+      ocrCanvas.height = oh;
+      const octx = ocrCanvas.getContext('2d');
+      if (octx) {
+        octx.drawImage(cropCtx ? cropCanvas : canvas, 0, 0, ow, oh);
+        resolve({
+          enhancedDataUrl,
+          ocrDataUrl: ocrCanvas.toDataURL('image/jpeg', jpegQuality),
+          width: w,
+          height: h,
+          ocrWidth: ow,
+          ocrHeight: oh,
+          sourceYScale: cropHeight / h,
+          thermalRows,
+        });
+        return;
       }
 
       resolve({
@@ -310,8 +378,12 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
         height: h,
         ocrWidth: w,
         ocrHeight: h,
+        sourceYScale: 1,
         thermalRows,
       });
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     };
     img.onerror = () => reject(new Error('خطا در بارگذاری تصویر برای پردازش'));
     img.src = dataUrl;
@@ -319,7 +391,7 @@ async function enhanceImageOnCanvas(dataUrl: string): Promise<{
 }
 
 let cachedFasWorker: Worker | null = null;
-let lastProgressCb: ((pct: number) => void) | null = null;
+let lastProgressCb: ((status: string, pct: number) => void) | null = null;
 
 async function getOrInitFasWorker(): Promise<Worker> {
   if (cachedFasWorker) return cachedFasWorker;
@@ -341,8 +413,8 @@ async function getOrInitFasWorker(): Promise<Worker> {
     gzip: true,
     cacheMethod: 'none',
     logger: (m) => {
-      if (m.status === 'recognizing text' && typeof m.progress === 'number') {
-        lastProgressCb?.(m.progress);
+      if (typeof m.progress === 'number') {
+        lastProgressCb?.(m.status, m.progress);
       }
     },
   });
@@ -355,37 +427,69 @@ export async function runOnDeviceAutonomousScan(
   onProgress?: (stage: string, pct: number) => void
 ): Promise<ScanResponse> {
   const startedAt = Date.now();
-  onProgress?.('بهینه‌سازی نور، سایه و استخراج ارقام فاکتور...', 16);
-  const { enhancedDataUrl, ocrDataUrl, ocrWidth, ocrHeight, thermalRows } =
-    await enhanceImageOnCanvas(dataUrl);
+  const lowPowerAndroid = isLowPowerAndroid();
+  onProgress?.('بهینه‌سازی عکس با حالت سازگار با گوشی شما...', 16);
+  const { enhancedDataUrl, ocrDataUrl, ocrWidth, ocrHeight, sourceYScale, thermalRows } =
+    await enhanceImageOnCanvas(dataUrl, onProgress);
 
-  onProgress?.('آماده‌سازی موتور شبکه عصبی فارسی...', 28);
-  lastProgressCb = (p) => {
-    const pct = Math.round(32 + p * 60);
-    onProgress?.('در حال خواندن نام کالاها و مبالغ فاکتور...', pct);
+  onProgress?.('آماده‌سازی موتور خوانش فارسی (اولین اسکن ممکن است کمی بیشتر طول بکشد)...', 45);
+  lastProgressCb = (status, p) => {
+    if (status === 'recognizing text') {
+      const pct = Math.round(52 + p * 43);
+      onProgress?.('در حال خواندن نام کالاها و مبالغ فاکتور...', pct);
+    } else if (status === 'loading tesseract core') {
+      onProgress?.('بارگذاری موتور OCR فارسی روی گوشی...', Math.round(45 + p * 4));
+    } else if (status === 'loading language traineddata') {
+      onProgress?.('بارگذاری واژه‌نامهٔ فارسی...', Math.round(49 + p * 3));
+    }
   };
 
   let fasWorker: Worker;
   try {
     fasWorker = await withTimeout(
       getOrInitFasWorker(),
-      35000,
+      lowPowerAndroid ? 90000 : 45000,
       'بارگذاری اولیه موتور بینایی ماشین'
     );
   } catch (err) {
+    const worker = cachedFasWorker;
     cachedFasWorker = null;
+    if (worker) await worker.terminate().catch(() => {});
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('Timeout')) {
+      throw new Error(
+        lowPowerAndroid
+          ? 'آماده‌سازی موتور فارسی روی گوشی قدیمی بیش از حد طول کشید. برنامه را باز نگه دار و دوباره تلاش کن.'
+          : 'بارگذاری موتور خوانش فاکتور طول کشید. یک بار دیگر امتحان کن.'
+      );
+    }
     throw err;
   }
 
   try {
-    onProgress?.('در حال استخراج اقلام، قیمت‌ها و تخفیف‌های فاکتور...', 36);
-    const fasRes = await withTimeout(
-      fasWorker.recognize(ocrDataUrl, {}, { blocks: true }),
-      45000,
-      'خوانش تصویر فاکتور'
-    );
+    onProgress?.('در حال خواندن متن فاکتور روی گوشی...', 51);
+    let fasRes;
+    try {
+      fasRes = await withTimeout(
+        fasWorker.recognize(ocrDataUrl, {}, { blocks: true }),
+        lowPowerAndroid ? 150000 : 90000,
+        'خوانش تصویر فاکتور'
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('Timeout')) {
+        if (cachedFasWorker === fasWorker) cachedFasWorker = null;
+        await fasWorker.terminate().catch(() => {});
+        throw new Error(
+          lowPowerAndroid
+            ? 'خواندن فاکتور روی گوشی قدیمی بیشتر از حد مجاز طول کشید. عکس واضح و نزدیک‌تری بگیر؛ اگر دوباره تکرار شد، مدل گوشی و پیام خطا را بفرست.'
+            : 'خواندن عکس بیشتر از حد مجاز طول کشید. لطفاً عکس واضح‌تر یا نزدیک‌تری امتحان کن.'
+        );
+      }
+      throw err;
+    }
 
-    onProgress?.('تطبیق هوشمند اقلام فاکتور با لیست خرید...', 95);
+    onProgress?.('تطبیق هوشمند اقلام فاکتور با لیست خرید...', 96);
 
     const fasLinesRaw =
       fasRes.data.blocks?.flatMap((b) => b.paragraphs.flatMap((p) => p.lines)) || [];
@@ -396,9 +500,9 @@ export async function runOnDeviceAutonomousScan(
     for (const fl of fasLinesRaw) {
       const box: BoundingBox = {
         x: Number((fl.bbox.x0 / ocrWidth).toFixed(4)),
-        y: Number((fl.bbox.y0 / ocrHeight).toFixed(4)),
+        y: Number(((fl.bbox.y0 / ocrHeight) * sourceYScale).toFixed(4)),
         w: Number(((fl.bbox.x1 - fl.bbox.x0) / ocrWidth).toFixed(4)),
-        h: Number(((fl.bbox.y1 - fl.bbox.y0) / ocrHeight).toFixed(4)),
+        h: Number((((fl.bbox.y1 - fl.bbox.y0) / ocrHeight) * sourceYScale).toFixed(4)),
         text: fl.text.trim(),
         confidence: Math.round(fl.confidence || 90),
       };

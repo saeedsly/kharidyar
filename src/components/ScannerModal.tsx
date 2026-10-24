@@ -142,15 +142,17 @@ export function ScannerModal({
     if (Capacitor.isNativePlatform()) {
       try {
         const photo = await CapCamera.getPhoto({
+          // Keep the original photo on disk. Base64 DataUrl doubles memory use on Android 7.
           quality: 92,
           width: 1600,
           allowEditing: false,
           correctOrientation: true,
-          resultType: CameraResultType.DataUrl,
+          resultType: CameraResultType.Uri,
           source: CameraSource.Camera,
         });
-        if (photo.dataUrl) {
-          await executeScan({ dataUrl: photo.dataUrl });
+        const photoUrl = photo.webPath || photo.path;
+        if (photoUrl) {
+          await executeScan({ dataUrl: photoUrl });
         }
         return;
       } catch (err: any) {

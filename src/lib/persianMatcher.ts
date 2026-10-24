@@ -212,6 +212,8 @@ export function cleanPersianProductTitle(rawTitle: string): string {
     .replace(/بیسگویت/g, 'بیسکویت')
     .replace(/گرم\s+نارگیل/g, 'کرم نارگیل')
     .replace(/نکتار\s+سبب/g, 'نکتار سیب')
+    .replace(/(نکتار\s+سیب)\s+\d{3,8}(?=\s|$)/g, '$1 ۲۰۰ سی‌سی')
+    .replace(/(آبمیوه\s+هفت\s+میوه)\s+\d{3,8}(?=\s|$)/g, '$1 ۲۰۰ سی‌سی')
     .replace(/آبمیو[^\s]*\s+هفت/g, 'آبمیوه هفت')
     .replace(/ابمیو[^\s]*\s+هفت/g, 'آبمیوه هفت')
     .replace(/روغشن/g, 'روغن')
@@ -231,13 +233,18 @@ export function cleanPersianProductTitle(rawTitle: string): string {
 
   // Remove trailing 1-or-2 char border noise tokens produced by table vertical lines
   s = s
-    .replace(/\s+(?:هت|وت|ات|اد|شا|کت|یت|پچ|ن|و|ی|ه|ا|\d{1,2})$/g, '')
-    .replace(/\s+(?:هت|وت|ات|اد|شا|کت|یت|پچ|ن|و|ی|ه|ا|\d{1,2})$/g, '')
+    .replace(/\s+(?:هت|وت|ات|اد|شا|کت|یت|پچ|لا|ن|و|ی|ه|ا|\d{1,2})$/g, '')
+    .replace(/\s+(?:هت|وت|ات|اد|شا|کت|یت|پچ|لا|ن|و|ی|ه|ا|\d{1,2})$/g, '')
     .replace(/^(?:و|ی|ه|ا|\d{1,2})\s+/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  return toPersianDigits(s);
+  // Normalize once more after inserted volume aliases so a ZWNJ doesn't leave duplicate OCR units.
+  s = normalizePersianText(s)
+    .replace(/\b(200)\s+سی(?:\s+سی)+/g, '$1 سی سی')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return toPersianDigits(s).replace(/۲۰۰\s+سی\s+سی/g, '۲۰۰ سی‌سی');
 }
 
 /**
@@ -282,8 +289,8 @@ export function extractThermalRowsFromGrayscale(
 
   // Find connected components of ink (bw === 1) within x in [80, W - 150]
   const visited = new Uint8Array(total);
-  const xMinBound = Math.round(W * 0.065);
-  const xMaxBound = Math.round(W * 0.88);
+  const xMinBound = Math.round(W * 0.055);
+  const xMaxBound = Math.round(W * 0.89);
   const yMinBound = Math.round(H * 0.24);
   const yMaxBound = Math.round(H * 0.88);
 
@@ -297,8 +304,15 @@ export function extractThermalRowsFromGrayscale(
   }
 
   const comps: Comp[] = [];
-  const qx = new Int32Array(4096);
-  const qy = new Int32Array(4096);
+  // Reusable ring queue: avoids millions of short-lived neighbor arrays on older Android WebViews.
+  const queueCapacity = 16384;
+  const qx = new Int32Array(queueCapacity);
+  const qy = new Int32Array(queueCapacity);
+  // Reuse these small buffers for exact enclosed-hole detection (thermal ۰ and ۵/۹ digits).
+  const localCapacity = 45 * 46;
+  const bgVisited = new Uint8Array(localCapacity);
+  const bgQx = new Int16Array(localCapacity);
+  const bgQy = new Int16Array(localCapacity);
 
   for (let y0 = yMinBound; y0 < yMaxBound; y0++) {
     const rowOff = y0 * W;
@@ -306,10 +320,10 @@ export function extractThermalRowsFromGrayscale(
       const idx0 = rowOff + x0;
       if (bw[idx0] === 1 && visited[idx0] === 0) {
         let head = 0;
-        let tail = 0;
-        qx[tail] = x0;
-        qy[tail] = y0;
-        tail++;
+        let tail = 1;
+        let pending = 1;
+        qx[0] = x0;
+        qy[0] = y0;
         visited[idx0] = 1;
         let minX = x0,
           maxX = x0,
@@ -317,93 +331,148 @@ export function extractThermalRowsFromGrayscale(
           maxY = y0;
         let area = 0;
 
-        while (head < tail) {
+        while (pending > 0) {
           const cx = qx[head];
           const cy = qy[head];
-          head++;
+          head = (head + 1) % queueCapacity;
+          pending--;
           area++;
           if (cx < minX) minX = cx;
           if (cx > maxX) maxX = cx;
           if (cy < minY) minY = cy;
           if (cy > maxY) maxY = cy;
 
-          const nbs = [
-            [cx - 1, cy],
-            [cx + 1, cy],
-            [cx, cy - 1],
-            [cx, cy + 1],
-          ];
-          for (const [nx, ny] of nbs) {
-            if (nx >= xMinBound && nx < xMaxBound && ny >= yMinBound && ny < yMaxBound) {
-              const nIdx = ny * W + nx;
-              if (bw[nIdx] === 1 && visited[nIdx] === 0) {
-                visited[nIdx] = 1;
-                if (tail < qx.length) {
-                  qx[tail] = nx;
-                  qy[tail] = ny;
-                  tail++;
-                }
-              }
-            }
+          // Inline 4-neighbor checks instead of allocating nested arrays per ink pixel.
+          let nx = cx - 1;
+          let ny = cy;
+          let nIdx = rowOff + (cy - y0) * W + nx;
+          if (nx >= xMinBound && bw[nIdx] === 1 && visited[nIdx] === 0 && pending < queueCapacity) {
+            visited[nIdx] = 1;
+            qx[tail] = nx;
+            qy[tail] = ny;
+            tail = (tail + 1) % queueCapacity;
+            pending++;
+          } else if (nx >= xMinBound && bw[nIdx] === 1 && visited[nIdx] === 0) {
+            visited[nIdx] = 1;
+          }
+
+          nx = cx + 1;
+          nIdx = rowOff + (cy - y0) * W + nx;
+          if (nx < xMaxBound && bw[nIdx] === 1 && visited[nIdx] === 0 && pending < queueCapacity) {
+            visited[nIdx] = 1;
+            qx[tail] = nx;
+            qy[tail] = ny;
+            tail = (tail + 1) % queueCapacity;
+            pending++;
+          } else if (nx < xMaxBound && bw[nIdx] === 1 && visited[nIdx] === 0) {
+            visited[nIdx] = 1;
+          }
+
+          nx = cx;
+          ny = cy - 1;
+          nIdx = ny * W + nx;
+          if (ny >= yMinBound && bw[nIdx] === 1 && visited[nIdx] === 0 && pending < queueCapacity) {
+            visited[nIdx] = 1;
+            qx[tail] = nx;
+            qy[tail] = ny;
+            tail = (tail + 1) % queueCapacity;
+            pending++;
+          } else if (ny >= yMinBound && bw[nIdx] === 1 && visited[nIdx] === 0) {
+            visited[nIdx] = 1;
+          }
+
+          ny = cy + 1;
+          nIdx = ny * W + nx;
+          if (ny < yMaxBound && bw[nIdx] === 1 && visited[nIdx] === 0 && pending < queueCapacity) {
+            visited[nIdx] = 1;
+            qx[tail] = nx;
+            qy[tail] = ny;
+            tail = (tail + 1) % queueCapacity;
+            pending++;
+          } else if (ny < yMaxBound && bw[nIdx] === 1 && visited[nIdx] === 0) {
+            visited[nIdx] = 1;
           }
         }
 
         const cw = maxX - minX + 1;
         const ch = maxY - minY + 1;
         if (cw >= 6 && cw <= 45 && ch >= 11 && ch <= 46 && area >= 22) {
-          // Check if background (bw === 0) inside [minX..maxX, minY..maxY] has an enclosed interior hole
-          const bgVis = new Uint8Array(cw * ch);
-          const bqx = new Int32Array(cw * ch);
-          const bqy = new Int32Array(cw * ch);
-          let bHead = 0,
-            bTail = 0;
+          const localSize = cw * ch;
+          bgVisited.fill(0, 0, localSize);
+          let bgHead = 0;
+          let bgTail = 0;
+
+          // Seed all background pixels touching the component bounding-box edge.
           for (let bx = 0; bx < cw; bx++) {
-            for (const by of [0, ch - 1]) {
-              if (bw[(minY + by) * W + (minX + bx)] === 0 && bgVis[by * cw + bx] === 0) {
-                bgVis[by * cw + bx] = 1;
-                bqx[bTail] = bx;
-                bqy[bTail] = by;
-                bTail++;
-              }
+            const top = bx;
+            const bottom = (ch - 1) * cw + bx;
+            if (bw[minY * W + minX + bx] === 0 && bgVisited[top] === 0) {
+              bgVisited[top] = 1;
+              bgQx[bgTail] = bx;
+              bgQy[bgTail++] = 0;
+            }
+            if (bw[(minY + ch - 1) * W + minX + bx] === 0 && bgVisited[bottom] === 0) {
+              bgVisited[bottom] = 1;
+              bgQx[bgTail] = bx;
+              bgQy[bgTail++] = ch - 1;
             }
           }
-          for (let by = 0; by < ch; by++) {
-            for (const bx of [0, cw - 1]) {
-              if (bw[(minY + by) * W + (minX + bx)] === 0 && bgVis[by * cw + bx] === 0) {
-                bgVis[by * cw + bx] = 1;
-                bqx[bTail] = bx;
-                bqy[bTail] = by;
-                bTail++;
-              }
+          for (let by = 1; by < ch - 1; by++) {
+            const left = by * cw;
+            const right = left + cw - 1;
+            if (bw[(minY + by) * W + minX] === 0 && bgVisited[left] === 0) {
+              bgVisited[left] = 1;
+              bgQx[bgTail] = 0;
+              bgQy[bgTail++] = by;
+            }
+            if (bw[(minY + by) * W + minX + cw - 1] === 0 && bgVisited[right] === 0) {
+              bgVisited[right] = 1;
+              bgQx[bgTail] = cw - 1;
+              bgQy[bgTail++] = by;
             }
           }
-          while (bHead < bTail) {
-            const bx = bqx[bHead];
-            const by = bqy[bHead];
-            bHead++;
-            const bn = [
-              [bx - 1, by],
-              [bx + 1, by],
-              [bx, by - 1],
-              [bx, by + 1],
-            ];
-            for (const [nx, ny] of bn) {
-              if (nx >= 0 && nx < cw && ny >= 0 && ny < ch) {
-                const bi = ny * cw + nx;
-                if (bgVis[bi] === 0 && bw[(minY + ny) * W + (minX + nx)] === 0) {
-                  bgVis[bi] = 1;
-                  bqx[bTail] = nx;
-                  bqy[bTail] = ny;
-                  bTail++;
-                }
-              }
+
+          while (bgHead < bgTail) {
+            const bx = bgQx[bgHead];
+            const by = bgQy[bgHead++];
+            let nx = bx - 1;
+            let ny = by;
+            let localIndex = ny * cw + nx;
+            if (nx >= 0 && bgVisited[localIndex] === 0 && bw[(minY + ny) * W + minX + nx] === 0) {
+              bgVisited[localIndex] = 1;
+              bgQx[bgTail] = nx;
+              bgQy[bgTail++] = ny;
+            }
+            nx = bx + 1;
+            localIndex = by * cw + nx;
+            if (nx < cw && bgVisited[localIndex] === 0 && bw[(minY + by) * W + minX + nx] === 0) {
+              bgVisited[localIndex] = 1;
+              bgQx[bgTail] = nx;
+              bgQy[bgTail++] = by;
+            }
+            nx = bx;
+            ny = by - 1;
+            localIndex = ny * cw + nx;
+            if (ny >= 0 && bgVisited[localIndex] === 0 && bw[(minY + ny) * W + minX + nx] === 0) {
+              bgVisited[localIndex] = 1;
+              bgQx[bgTail] = nx;
+              bgQy[bgTail++] = ny;
+            }
+            ny = by + 1;
+            localIndex = ny * cw + bx;
+            if (ny < ch && bgVisited[localIndex] === 0 && bw[(minY + ny) * W + minX + bx] === 0) {
+              bgVisited[localIndex] = 1;
+              bgQx[bgTail] = bx;
+              bgQy[bgTail++] = ny;
             }
           }
+
           let holePixels = 0;
           let holeSumY = 0;
           for (let by = 1; by < ch - 1; by++) {
             for (let bx = 1; bx < cw - 1; bx++) {
-              if (bw[(minY + by) * W + (minX + bx)] === 0 && bgVis[by * cw + bx] === 0) {
+              const localIndex = by * cw + bx;
+              if (bw[(minY + by) * W + minX + bx] === 0 && bgVisited[localIndex] === 0) {
                 holePixels++;
                 holeSumY += by;
               }
@@ -431,7 +500,6 @@ export function extractThermalRowsFromGrayscale(
   if (zeroBoxes.length < 8) {
     return { thermalRows: [], zeroBoxes: [] };
   }
-
   const zeroYs = zeroBoxes.map((z) => z.y + Math.floor(z.h / 2)).sort((a, b) => a - b);
   const clusters: number[][] = [];
   for (const zy of zeroYs) {
@@ -773,7 +841,8 @@ export function parsePersianReceiptText(
       const dy = Number(dateMatch[3]);
       // Fix common thermal OCR '0' -> '9' in date like 1495/98/01 -> 1405/08/01
       if (yr >= 1490) yr -= 90;
-      if (mo > 12 && mo >= 91 && mo <= 99) mo -= 90;
+      if (mo >= 13 && mo <= 19) mo -= 10;
+      else if (mo > 12 && mo >= 91 && mo <= 99) mo -= 90;
       jalaliDate = toPersianDigits(
         `${yr}/${String(mo).padStart(2, '0')}/${String(dy).padStart(2, '0')}`
       );
