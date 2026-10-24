@@ -77,11 +77,8 @@ export function AboutOwnerModal({
               <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-right">
                 <div className="relative shrink-0">
                   <img
-                    src="https://avatars.githubusercontent.com/u/221086467?v=4"
-                    alt="سعید سالاری - Saeed Salari"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src = assetUrl('icon-192.png');
-                    }}
+                    src={assetUrl('icon-192.png')}
+                    alt="نشان خریدیـار"
                     className="h-20 w-20 rounded-3xl object-cover border-2 border-blue-100 shadow-sm bg-blue-50"
                   />
                   <span
@@ -192,9 +189,9 @@ export function AboutOwnerModal({
               </div>
 
               <p className="text-xs leading-relaxed text-slate-500">
-                دسترسی دوربین صرفاً در لحظه اسکن فاکتور با اراده کاربر فعال می‌شود. اطلاعات لیست
-                خرید و فاکتورها در فضای کاری اختصاصی شما نگهداری شده و هر زمان اراده کنید می‌توانید
-                کل داده‌های خود را به صورت دائمی پاک‌سازی نمایید:
+                دسترسی دوربین فقط هنگام انتخاب کاربر درخواست می‌شود. عکس فاکتور روی گوشی پردازش
+                نمی‌شود که به سرور فرستاده شود؛ نتیجهٔ خوانده‌شده و فاکتورها در حافظهٔ همین دستگاه
+                می‌مانند. برای انتقال یا نگهداری جداگانه، از بخش «پشتیبان» فایل پشتیبان بگیر.
               </p>
 
               <div className="pt-1 flex justify-end">

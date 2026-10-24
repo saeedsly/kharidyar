@@ -1,32 +1,40 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   AlertTriangle,
   ArrowLeft,
   Award,
+  CalendarDays,
   Camera,
   CheckCircle2,
   ExternalLink,
   Linkedin,
   ListChecks,
+  PiggyBank,
   ReceiptText,
   Sparkles,
   TrendingDown,
   Wallet,
 } from 'lucide-react';
 import type { Receipt, ShoppingItem, ShoppingList } from '../types';
-import { formatToman, toPersianDigits } from '../lib/persianMatcher';
+import { formatCurrency, formatToman, toPersianDigits } from '../lib/persianMatcher';
+import { formatMonthKey, getCurrentJalaliMonthKey, receiptDayKey, receiptMonthKey } from '../lib/jalaliDate';
 import { OWNER_LINKEDIN_URL } from './AboutOwnerModal';
 
 interface DashboardTabProps {
   receipts: Receipt[];
   activeList: ShoppingList | null;
   activeListItems: ShoppingItem[];
+  monthlyBudget: number;
+  onSaveMonthlyBudget: (amount: number) => void;
   onOpenScanner: (sampleId?: string) => void;
   onGoToList: () => void;
   onGoToReceipts: () => void;
   onSelectReceipt: (receipt: Receipt) => void;
   onOpenAboutOwner: () => void;
 }
+
+const isLiraReceipt = (receipt: Receipt) => /(?:لیر|₺|\bTRY\b|\bTL\b)/i.test(receipt.currency || '');
 
 const CATEGORY_COLORS: Record<string, string> = {
   لبنیات: 'bg-blue-500',
@@ -43,14 +51,58 @@ export function DashboardTab({
   receipts,
   activeList,
   activeListItems,
+  monthlyBudget,
+  onSaveMonthlyBudget,
   onOpenScanner,
   onGoToList,
   onGoToReceipts,
   onSelectReceipt,
   onOpenAboutOwner,
 }: DashboardTabProps) {
-  const totalSpent = receipts.reduce((sum, r) => sum + Number(r.total_amount || 0), 0);
-  const totalSaved = receipts.reduce((sum, r) => sum + Number(r.discount_total || 0), 0);
+  const [budgetDraft, setBudgetDraft] = useState(monthlyBudget ? String(monthlyBudget) : '');
+  const currentMonthKey = getCurrentJalaliMonthKey();
+  const monthLabel = formatMonthKey(currentMonthKey);
+  const monthReceipts = receipts.filter(
+    (receipt) => receiptMonthKey(receipt.jalali_date || receipt.created_at) === currentMonthKey
+  );
+  const monthTomanReceipts = monthReceipts.filter((receipt) => !isLiraReceipt(receipt));
+  const monthLiraReceipts = monthReceipts.filter(isLiraReceipt);
+  const monthlySpent = monthTomanReceipts.reduce((sum, receipt) => sum + Number(receipt.total_amount || 0), 0);
+  const monthlyLiraSpent = monthLiraReceipts.reduce((sum, receipt) => sum + Number(receipt.total_amount || 0), 0);
+  const monthlyDiscount = monthTomanReceipts.reduce((sum, receipt) => sum + Number(receipt.discount_total || 0), 0);
+  const totalSpent = receipts
+    .filter((receipt) => !isLiraReceipt(receipt))
+    .reduce((sum, receipt) => sum + Number(receipt.total_amount || 0), 0);
+  const budgetPercent = monthlyBudget > 0 ? Math.min(100, Math.round((monthlySpent / monthlyBudget) * 100)) : 0;
+
+  useEffect(() => {
+    setBudgetDraft(monthlyBudget ? String(monthlyBudget) : '');
+  }, [monthlyBudget]);
+
+  const dailyGroups = new Map<
+    string,
+    { dayKey: string; currency: string; total: number; stores: Set<string>; receiptCount: number }
+  >();
+  for (const receipt of monthReceipts) {
+    const dayKey = receiptDayKey(receipt.jalali_date || receipt.created_at);
+    if (!dayKey) continue;
+    const currency = isLiraReceipt(receipt) ? 'لیر' : 'تومان';
+    const groupKey = `${dayKey}|${currency}`;
+    const group = dailyGroups.get(groupKey) || {
+      dayKey,
+      currency,
+      total: 0,
+      stores: new Set<string>(),
+      receiptCount: 0,
+    };
+    group.total += Number(receipt.total_amount || 0);
+    group.receiptCount += 1;
+    group.stores.add(receipt.store_name || 'فروشگاه');
+    dailyGroups.set(groupKey, group);
+  }
+  const recentShoppingDays = [...dailyGroups.entries()]
+    .sort((a, b) => b[1].dayKey.localeCompare(a[1].dayKey) || b[0].localeCompare(a[0]))
+    .slice(0, 4);
 
   const checkedItemsCount = activeListItems.filter((i) => i.is_checked).length;
   const missingItems = activeListItems.filter(
@@ -61,9 +113,9 @@ export function DashboardTab({
       ? Math.round((checkedItemsCount / activeListItems.length) * 100)
       : 0;
 
-  // Aggregate spending by product category across all scanned receipts
+  // Aggregate product categories within the selected current Persian month.
   const categoryTotals: Record<string, number> = {};
-  for (const r of receipts) {
+  for (const r of monthTomanReceipts) {
     for (const item of r.items || []) {
       const cat = item.category || 'خواربار';
       categoryTotals[cat] = (categoryTotals[cat] || 0) + Number(item.total_price || 0);
@@ -86,23 +138,31 @@ export function DashboardTab({
           <div>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
               <Wallet className="h-3.5 w-3.5" />
-              مجموع خریدهای ثبت‌شده
+              هزینهٔ خریدهای {monthLabel}
             </span>
             <div className="mt-3 flex items-baseline gap-1.5 tabular-fa">
               <span className="text-3xl font-extrabold tracking-tight text-slate-900">
-                {formatToman(totalSpent, false)}
+                {formatToman(monthlySpent, false)}
               </span>
               <span className="text-sm font-medium text-slate-500">تومان</span>
             </div>
+            <p className="mt-1 text-[11px] text-slate-500 tabular-fa">
+              همهٔ خریدهای تومانی: {formatToman(totalSpent)}
+            </p>
+            {monthlyLiraSpent > 0 && (
+              <p className="mt-1 text-[11px] font-semibold text-slate-600 tabular-fa">
+                خریدهای ثبت‌شده به لیر: {formatCurrency(monthlyLiraSpent, 'لیر')}
+              </p>
+            )}
           </div>
 
           <div className="text-left">
             <div className="inline-flex items-center gap-1 rounded-2xl bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 tabular-fa">
               <TrendingDown className="h-3.5 w-3.5" />
-              سود تخفیف: {formatToman(totalSaved, false)}
+              تخفیف این ماه: {formatToman(monthlyDiscount, false)}
             </div>
             <p className="mt-1.5 text-xs text-slate-400 tabular-fa">
-              {toPersianDigits(receipts.length)} فاکتور دیجیتال آرشیو شده
+              {toPersianDigits(monthReceipts.length)} فاکتور در این ماه
             </p>
           </div>
         </div>
@@ -128,6 +188,100 @@ export function DashboardTab({
           </button>
         </div>
       </motion.div>
+
+      <motion.section
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-5 text-white shadow-[0_18px_44px_rgba(15,23,42,0.16)]"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold text-blue-100">
+              <CalendarDays className="h-3.5 w-3.5" />
+              جمع‌بندی ماهانه • {monthLabel}
+            </span>
+            <p className="mt-3 text-2xl font-black tabular-fa">{formatToman(monthlySpent)}</p>
+            <p className="mt-1 text-[11px] text-slate-300">
+              {toPersianDigits(monthReceipts.length)} فاکتور؛ خریدهای چند فروشگاه در هر روز با هم جمع شده‌اند.
+            </p>
+          </div>
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-emerald-300">
+            <PiggyBank className="h-6 w-6" />
+          </div>
+        </div>
+
+        {monthlyBudget > 0 && (
+          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3.5">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="font-bold text-slate-200">بودجهٔ این ماه</span>
+              <span className="font-extrabold tabular-fa">
+                {formatToman(monthlyBudget, false)} تومان • {toPersianDigits(budgetPercent)}٪ مصرف شده
+              </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+              <div
+                className={`h-full rounded-full transition-all ${budgetPercent >= 100 ? 'bg-rose-400' : 'bg-emerald-400'}`}
+                style={{ width: `${budgetPercent}%` }}
+              />
+            </div>
+            <p className="mt-2 text-[11px] text-slate-300 tabular-fa">
+              {monthlySpent > monthlyBudget
+                ? `از بودجه ${formatToman(monthlySpent - monthlyBudget)} بیشتر شده‌ای.`
+                : `${formatToman(monthlyBudget - monthlySpent)} تا سقف بودجه باقی مانده.`}
+            </p>
+          </div>
+        )}
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSaveMonthlyBudget(Number(budgetDraft));
+          }}
+          className="mt-3 flex gap-2"
+        >
+          <input
+            type="number"
+            min="0"
+            step="100000"
+            value={budgetDraft}
+            onChange={(event) => setBudgetDraft(event.target.value)}
+            placeholder="بودجهٔ ماهانه به تومان (اختیاری)"
+            aria-label="بودجهٔ ماهانه به تومان"
+            className="min-w-0 flex-1 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 text-xs font-bold text-white placeholder:text-slate-400 outline-none focus:border-blue-300"
+          />
+          <button
+            type="submit"
+            className="shrink-0 rounded-xl bg-white px-3.5 py-2.5 text-xs font-extrabold text-slate-900 transition hover:bg-blue-50"
+          >
+            ذخیره بودجه
+          </button>
+        </form>
+
+        {recentShoppingDays.length > 0 && (
+          <div className="mt-4 border-t border-white/10 pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-200">خریدهای روزانهٔ این ماه</span>
+              <span className="text-[10px] text-slate-400">فاکتورهای همان روز تجمیع شده‌اند</span>
+            </div>
+            <div className="space-y-2">
+              {recentShoppingDays.map(([groupKey, group]) => (
+                <div key={groupKey} className="flex items-center justify-between gap-3 rounded-xl bg-white/5 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-xs font-extrabold tabular-fa">{toPersianDigits(group.dayKey.replace(/-/g, '/'))}</p>
+                    <p className="mt-0.5 truncate text-[10px] text-slate-400">
+                      {group.stores.size > 1
+                        ? `${toPersianDigits(group.stores.size)} فروشگاه: ${[...group.stores].join('، ')}`
+                        : [...group.stores][0] || 'خرید روزانه'}
+                      {group.receiptCount > 1 ? ` • ${toPersianDigits(group.receiptCount)} فاکتور` : ''}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-xs font-black tabular-fa">{formatCurrency(group.total, group.currency)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </motion.section>
 
       {/* Active Smart Shopping List Status & Missing Items Radar */}
       {activeList && (
@@ -197,7 +351,7 @@ export function DashboardTab({
           transition={{ delay: 0.1 }}
           className="rounded-3xl bg-white p-5 shadow-[0_8px_30px_rgba(15,23,42,0.04)] border border-slate-200/70"
         >
-          <h3 className="text-sm font-bold text-slate-900 mb-3.5">تفکیک هوشمند دسته‌بندی خریدها</h3>
+          <h3 className="text-sm font-bold text-slate-900 mb-3.5">دسته‌بندی خرج‌های {monthLabel}</h3>
           <div className="space-y-3">
             {sortedCategories.map(([cat, amount]) => {
               const pct = Math.max(8, Math.round((amount / maxCatSum) * 100));
@@ -262,9 +416,9 @@ export function DashboardTab({
               </div>
               <div className="text-left shrink-0 mr-2">
                 <p className="text-sm font-extrabold text-slate-900 tabular-fa">
-                  {formatToman(rec.total_amount, false)}
+                  {formatCurrency(rec.total_amount, rec.currency, false)}
                 </p>
-                <p className="text-[11px] font-medium text-emerald-600">تومان</p>
+                <p className="text-[11px] font-medium text-emerald-600">{isLiraReceipt(rec) ? 'لیر' : 'تومان'}</p>
               </div>
             </button>
           ))}

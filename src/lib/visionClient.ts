@@ -2,52 +2,171 @@ import { createWorker } from 'tesseract.js';
 import type { BoundingBox, ScanResponse, ShoppingItem } from '../types';
 import { assetUrl } from './assetUrl';
 import {
-  fuseDualHeadLines,
   parsePersianReceiptText,
   reconcileReceiptWithShoppingList,
-  type NeuralLineInput,
 } from './persianMatcher';
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from './supabase';
 
-export interface CloudVisionSettings {
-  enabled: boolean;
-  provider: 'gemini' | 'openai';
-  apiKey: string;
+export type ReceiptOcrLanguage = 'fa-en' | 'tr-en';
+
+const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
+  'fa-en': 'fas+eng',
+  'tr-en': 'tur+eng',
+};
+const MAX_RECEIPT_EDGE = 1500;
+const MAX_SCAN_TIME_MS = 60_000;
+const WORKER_IDLE_MS = 60_000;
+
+type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
+let workerPromise: Promise<OcrWorker> | null = null;
+let workerInstance: OcrWorker | null = null;
+let workerLanguage = '';
+let activeProgress: ((stage: string, percent: number) => void) | null = null;
+let activeCancel: (() => void) | null = null;
+let cancelRequested = false;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function progress(stage: string, percent: number) {
+  activeProgress?.(stage, Math.max(0, Math.min(98, Math.round(percent))));
 }
 
-export function getCloudVisionSettings(): CloudVisionSettings {
-  try {
-    const raw = localStorage.getItem('kharidyar_vision_ai_v1');
-    if (raw) return JSON.parse(raw) as CloudVisionSettings;
-  } catch {
-    // ignore
+function resetIdleTimer() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => disposeWorker(), WORKER_IDLE_MS);
+}
+
+function disposeWorker() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = null;
+
+  const pending = workerPromise;
+  const ready = workerInstance;
+  workerPromise = null;
+  workerInstance = null;
+  workerLanguage = '';
+
+  if (ready) {
+    void ready.terminate().catch(() => {});
+  } else if (pending) {
+    // createWorker does not expose its worker until language initialization finishes. If a scan
+    // timed out during setup, terminate it as soon as the pending initialization settles.
+    void pending.then((worker) => worker.terminate()).catch(() => {});
   }
-  return { enabled: false, provider: 'gemini', apiKey: '' };
 }
 
-export function saveCloudVisionSettings(settings: CloudVisionSettings) {
-  localStorage.setItem('kharidyar_vision_ai_v1', JSON.stringify(settings));
+export function cancelActiveOcrScan(): void {
+  cancelRequested = true;
+  activeCancel?.();
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => void): Promise<T> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`Timeout (${ms}ms): ${label}`)), ms);
+    const timer = setTimeout(() => {
+      onTimeout();
+      const error = new Error('SCAN_TIMEOUT');
+      reject(error);
+    }, timeoutMs);
     promise.then(
-      (val) => {
-        clearTimeout(t);
-        resolve(val);
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
       },
-      (err) => {
-        clearTimeout(t);
-        reject(err);
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
       }
     );
   });
 }
 
+async function getOcrWorker(
+  language: ReceiptOcrLanguage,
+  remainingMs: number,
+  onProgress?: (stage: string, percent: number) => void
+): Promise<OcrWorker> {
+  const languageCode = OCR_LANGUAGES[language];
+  if (workerPromise && workerLanguage !== languageCode) disposeWorker();
+  activeProgress = onProgress || null;
+
+  if (!workerPromise) {
+    workerLanguage = languageCode;
+    progress('بارگذاری موتور اسکن آفلاین...', 22);
+    const created = createWorker(languageCode, 1, {
+      workerBlobURL: false,
+      workerPath: assetUrl('tessdata/worker.min.js'),
+      corePath: assetUrl('tessdata').replace(/\/$/, ''),
+      langPath: assetUrl('tessdata').replace(/\/$/, ''),
+      gzip: true,
+      cacheMethod: 'write',
+      logger: (message) => {
+        if (message.status === 'recognizing text' && typeof message.progress === 'number') {
+          progress('در حال خواندن نام کالاها و قیمت‌ها...', 36 + message.progress * 58);
+        } else if (message.status === 'loading language traineddata') {
+          progress('آماده‌سازی زبان فاکتور برای پردازش...', 28);
+        } else if (message.status === 'loading tesseract core' || message.status === 'initializing tesseract') {
+          progress('راه‌اندازی موتور اسکن روی گوشی...', 23);
+        }
+      },
+    });
+
+    let trackedPromise: Promise<OcrWorker>;
+    trackedPromise = created.then(
+      (worker) => {
+        if (workerPromise === trackedPromise) {
+          workerInstance = worker;
+        } else {
+          // The user cancelled or the watchdog expired while the worker was being prepared.
+          void worker.terminate().catch(() => {});
+        }
+        return worker;
+      },
+      (error) => {
+        if (workerPromise === trackedPromise) {
+          workerPromise = null;
+          workerLanguage = '';
+        }
+        throw error;
+      }
+    );
+    workerPromise = trackedPromise;
+  }
+
+  const pending = workerPromise;
+  if (!pending) throw new Error('OCR_WORKER_UNAVAILABLE');
+  try {
+    const worker = await withTimeout(pending, remainingMs, () => disposeWorker());
+    workerInstance = worker;
+    return worker;
+  } catch (error) {
+    if ((error as Error)?.message === 'SCAN_TIMEOUT') disposeWorker();
+    throw error;
+  }
+}
+
+function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    if (typeof canvas.toBlob === 'function') {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('IMAGE_COMPRESSION_FAILED'))),
+        'image/jpeg',
+        quality
+      );
+      return;
+    }
+    try {
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      const binary = atob(dataUrl.slice(dataUrl.indexOf(',') + 1));
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      resolve(new Blob([bytes], { type: 'image/jpeg' }));
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 export async function normalizeAndCompressReceiptPhoto(
   source: File | Blob | string
-): Promise<{ compressedFile: File; previewDataUrl: string; width: number; height: number }> {
+): Promise<{ compressedFile: File; previewUrl: string; width: number; height: number; sizeBytes: number }> {
   let rawObjectUrl = '';
   const srcUrl =
     typeof source === 'string'
@@ -55,374 +174,205 @@ export async function normalizeAndCompressReceiptPhoto(
       : ((rawObjectUrl = URL.createObjectURL(source)), rawObjectUrl);
 
   try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.crossOrigin = 'anonymous';
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('فرمت تصویر قابل خواندن نیست'));
-      el.src = srcUrl;
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error('فرمت تصویر قابل خواندن نیست. لطفاً عکس دیگری انتخاب کنید.'));
+      element.src = srcUrl;
     });
 
-    const maxDim = 1600;
-    let w = img.naturalWidth || img.width;
-    let h = img.naturalHeight || img.height;
-    if (w > maxDim || h > maxDim) {
-      const ratio = Math.min(maxDim / w, maxDim / h);
-      w = Math.round(w * ratio);
-      h = Math.round(h * ratio);
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    if (!sourceWidth || !sourceHeight) throw new Error('تصویر فاکتور ابعاد معتبری ندارد.');
+
+    const scale = Math.min(1, MAX_RECEIPT_EDGE / Math.max(sourceWidth, sourceHeight));
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { alpha: false });
+    if (!context) throw new Error('مرورگر گوشی نتوانست تصویر را آماده کند.');
+
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, width, height);
+    // Use the browser's native canvas filter when available. This avoids the slow full-image
+    // JavaScript pixel loops that used to freeze older Android WebViews.
+    try {
+      context.filter = 'grayscale(1) contrast(1.12)';
+    } catch {
+      // Older WebViews can ignore canvas filters; a clean resized JPEG still works for OCR.
+    }
+    context.drawImage(image, 0, 0, width, height);
+    try {
+      context.filter = 'none';
+    } catch {
+      // No-op on older WebViews.
     }
 
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('خطا در آماده‌سازی بوم پردازش تصویر');
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-
-    const previewDataUrl = canvas.toDataURL('image/jpeg', 0.88);
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('خطا در فشرده‌سازی تصویر'))),
-        'image/jpeg',
-        0.88
-      );
-    });
-
-    const compressedFile = new File([blob], `receipt-${Date.now()}.jpg`, {
-      type: 'image/jpeg',
-    });
-
-    return { compressedFile, previewDataUrl, width: w, height: h };
+    const blob = await canvasToJpeg(canvas, 0.78);
+    const compressedFile = new File([blob], `receipt-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    const previewUrl = URL.createObjectURL(blob);
+    return { compressedFile, previewUrl, width, height, sizeBytes: blob.size };
   } finally {
     if (rawObjectUrl) URL.revokeObjectURL(rawObjectUrl);
   }
 }
 
-async function enhanceImageOnCanvas(dataUrl: string): Promise<{
-  enhancedDataUrl: string;
-  width: number;
-  height: number;
-}> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const targetW = 1480;
-      const scale = targetW / img.width;
-      const w = targetW;
-      const h = Math.max(200, Math.round(img.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        resolve({ enhancedDataUrl: dataUrl, width: img.width, height: img.height });
-        return;
-      }
-      ctx.drawImage(img, 0, 0, w, h);
-      const imgData = ctx.getImageData(0, 0, w, h);
-      const d = imgData.data;
+interface OcrLineData {
+  text: string;
+  confidence: number;
+  bbox: { x0: number; y0: number; x1: number; y1: number };
+}
 
-      const lumArr = new Uint8Array(w * h);
-      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-        lumArr[p] = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
-      }
-      const hist = new Uint32Array(256);
-      for (let p = 0; p < lumArr.length; p++) hist[lumArr[p]]++;
-      const totalPx = lumArr.length;
-      let acc = 0;
-      let pLow = 35;
-      let pHigh = 225;
-      for (let v = 0; v < 256; v++) {
-        acc += hist[v];
-        if (acc <= totalPx * 0.05) pLow = v;
-        if (acc <= totalPx * 0.85) pHigh = v;
-      }
-      const span = Math.max(25, pHigh - pLow);
-
-      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-        const stretched = Math.max(0, Math.min(255, ((lumArr[p] - pLow) * 255) / span));
-        d[i] = stretched;
-        d[i + 1] = stretched;
-        d[i + 2] = stretched;
-      }
-      ctx.putImageData(imgData, 0, 0);
-      resolve({
-        enhancedDataUrl: canvas.toDataURL('image/png'),
-        width: w,
-        height: h,
-      });
-    };
-    img.onerror = reject;
-    img.src = dataUrl;
-  });
+function flattenOcrLines(data: Awaited<ReturnType<OcrWorker['recognize']>>['data']): OcrLineData[] {
+  const lines = data.blocks?.flatMap((block) =>
+    block.paragraphs.flatMap((paragraph) => paragraph.lines)
+  );
+  if (lines?.length) return lines;
+  return data.text
+    .split(/\r?\n/)
+    .filter((text) => text.trim())
+    .map((text) => ({
+      text,
+      confidence: data.confidence || 0,
+      bbox: { x0: 0, y0: 0, x1: 0, y1: 0 },
+    }));
 }
 
 export async function runOnDeviceAutonomousScan(
-  dataUrl: string,
+  compressedFile: File,
+  previewUrl: string,
+  width: number,
+  height: number,
   shoppingItems: ShoppingItem[],
+  language: ReceiptOcrLanguage = 'fa-en',
   onProgress?: (stage: string, pct: number) => void
 ): Promise<ScanResponse> {
   const startedAt = Date.now();
-  onProgress?.('بهینه‌سازی نور، سایه و کنتراست عکس فاکتور...', 12);
-  const { enhancedDataUrl, width, height } = await enhanceImageOnCanvas(dataUrl);
-
-  const workerJsUrl = assetUrl('tessdata/worker.min.js');
-  const tessdataBaseUrl = assetUrl('tessdata').replace(/\/$/, '');
-  let p1 = 0;
-  let p2 = 0;
-
-  onProgress?.('بارگذاری موتور بینایی ماشین فارسی و عددی...', 24);
-
-  const [fasWorker, biWorker] = await withTimeout(
-    Promise.all([
-      createWorker('fas', 1, {
-        workerBlobURL: true,
-        workerPath: workerJsUrl,
-        corePath: tessdataBaseUrl,
-        langPath: tessdataBaseUrl,
-        gzip: true,
-        cacheMethod: 'none',
-        logger: (m) => {
-          if (m.status === 'recognizing text' && typeof m.progress === 'number') {
-            p1 = m.progress;
-            const combined = Math.round(30 + ((p1 + p2) / 2) * 62);
-            onProgress?.('در حال خواندن خطوط و مبالغ فاکتور...', combined);
-          }
-        },
-      }),
-      createWorker(['fas', 'eng'], 1, {
-        workerBlobURL: true,
-        workerPath: workerJsUrl,
-        corePath: tessdataBaseUrl,
-        langPath: tessdataBaseUrl,
-        gzip: true,
-        cacheMethod: 'none',
-        logger: (m) => {
-          if (m.status === 'recognizing text' && typeof m.progress === 'number') {
-            p2 = m.progress;
-            const combined = Math.round(30 + ((p1 + p2) / 2) * 62);
-            onProgress?.('در حال خواندن خطوط و مبالغ فاکتور...', combined);
-          }
-        },
-      }),
-    ]),
-    25000,
-    'راه‌اندازی موتور عصبی داخل مرورگر/گوشی'
-  );
+  let cancelled = false;
+  let rejectCancellation: ((error: Error) => void) | null = null;
+  const cancelledPromise = new Promise<never>((_, reject) => {
+    rejectCancellation = reject;
+  });
+  activeProgress = onProgress || null;
+  activeCancel = () => {
+    cancelled = true;
+    rejectCancellation?.(new Error('SCAN_CANCELLED'));
+    disposeWorker();
+  };
 
   try {
-    onProgress?.('در حال استخراج نام کالاها، فی و جمع فاکتور...', 35);
-    const [fasRes, biRes] = await withTimeout(
-      Promise.all([
-        fasWorker.recognize(enhancedDataUrl, {}, { blocks: true }),
-        biWorker.recognize(enhancedDataUrl, {}, { blocks: true }),
-      ]),
-      35000,
-      'خوانش تصویر فاکتور'
-    );
+    progress('در حال آماده‌سازی موتور آفلاین...', 21);
+    const worker = await Promise.race([
+      getOcrWorker(language, MAX_SCAN_TIME_MS, onProgress),
+      cancelledPromise,
+    ]);
 
-    onProgress?.('تطبیق هوشمند اقلام فاکتور با لیست خرید...', 95);
-
-    const fasLinesRaw =
-      fasRes.data.blocks?.flatMap((b) => b.paragraphs.flatMap((p) => p.lines)) || [];
-    const biLinesRaw =
-      biRes.data.blocks?.flatMap((b) => b.paragraphs.flatMap((p) => p.lines)) || [];
-
-    const lineBoxes: BoundingBox[] = [];
-    const paired: NeuralLineInput[] = [];
-
-    for (const fl of fasLinesRaw) {
-      const midY = (fl.bbox.y0 + fl.bbox.y1) / 2;
-      let bestBi = '';
-      let minDist = Infinity;
-      for (const bl of biLinesRaw) {
-        const dist = Math.abs(midY - (bl.bbox.y0 + bl.bbox.y1) / 2);
-        if (dist < 28 && dist < minDist) {
-          minDist = dist;
-          bestBi = bl.text || '';
-        }
-      }
-      const box: BoundingBox = {
-        x: Number((fl.bbox.x0 / width).toFixed(4)),
-        y: Number((fl.bbox.y0 / height).toFixed(4)),
-        w: Number(((fl.bbox.x1 - fl.bbox.x0) / width).toFixed(4)),
-        h: Number(((fl.bbox.y1 - fl.bbox.y0) / height).toFixed(4)),
-        text: fl.text.trim(),
-        confidence: Math.round(fl.confidence || 90),
-      };
-      lineBoxes.push(box);
-      paired.push({ fasText: fl.text, biText: bestBi, confidence: fl.confidence || 88, bbox: box });
+    const elapsed = Date.now() - startedAt;
+    const remainingMs = MAX_SCAN_TIME_MS - elapsed;
+    if (remainingMs <= 0) {
+      disposeWorker();
+      throw new Error('SCAN_TIMEOUT');
     }
 
-    const fusedLines = fuseDualHeadLines(paired);
-    const avgConf = ((fasRes.data.confidence || 84) + (biRes.data.confidence || 88)) / 2;
-    const parsed = parsePersianReceiptText(fusedLines, lineBoxes, avgConf);
-    const reconciliation = reconcileReceiptWithShoppingList(parsed.items, shoppingItems);
+    progress('در حال خواندن فاکتور...', 36);
+    const recognition = worker.recognize(compressedFile, {}, { blocks: true });
+    const recognized = await Promise.race([
+      withTimeout(recognition, remainingMs, () => disposeWorker()),
+      cancelledPromise,
+    ]);
 
-    onProgress?.('تکمیل شد!', 100);
+    const ocrLines = flattenOcrLines(recognized.data).filter((line) => line.text.trim());
+    const rawLines = ocrLines.map((line) => line.text.trim());
+    const lineBoxes: BoundingBox[] = ocrLines.map((line) => ({
+      x: Number((line.bbox.x0 / width).toFixed(4)),
+      y: Number((line.bbox.y0 / height).toFixed(4)),
+      w: Number(((line.bbox.x1 - line.bbox.x0) / width).toFixed(4)),
+      h: Number(((line.bbox.y1 - line.bbox.y0) / height).toFixed(4)),
+      text: line.text?.trim() || '',
+      confidence: Math.round(line.confidence || 0),
+    }));
+
+    progress('تطبیق اقلام با چک‌لیست خرید...', 96);
+    const confidence = Number(recognized.data.confidence || 75);
+    const parsed = parsePersianReceiptText(rawLines, lineBoxes, confidence);
+    const reconciliation = reconcileReceiptWithShoppingList(parsed.items, shoppingItems);
+    progress('فاکتور آمادهٔ بازبینی است.', 100);
+    resetIdleTimer();
 
     return {
       ok: true,
-      engine: 'موتور عصبی Dual-Head Persian LSTM',
+      engine: language === 'tr-en' ? 'OCR آفلاین ترکی و انگلیسی' : 'OCR آفلاین فارسی و انگلیسی',
       durationMs: Date.now() - startedAt,
-      originalImageUrl: dataUrl,
-      processedImageUrl: enhancedDataUrl,
+      originalImageUrl: previewUrl,
+      processedImageUrl: previewUrl,
       perspectiveCropped: false,
       lineBoxes,
-      rawOcrText: fusedLines.join('\n'),
+      rawOcrText: rawLines.join('\n'),
       receipt: {
         ...parsed,
-        ocr_engine: 'Dual-Head Persian LSTM OCR',
-        raw_ocr_text: fusedLines.join('\n'),
-        image_url: dataUrl,
-        processed_image_url: enhancedDataUrl,
+        ocr_engine: language === 'tr-en' ? 'Tesseract TUR+ENG Offline' : 'Tesseract FAS+ENG Offline',
+        raw_ocr_text: rawLines.join('\n'),
+        image_url: previewUrl,
+        processed_image_url: previewUrl,
       },
       reconciliation,
     };
+  } catch (error) {
+    if ((error as Error)?.message === 'SCAN_TIMEOUT') {
+      disposeWorker();
+      throw new Error('SCAN_TIMEOUT');
+    }
+    if ((error as Error)?.message === 'SCAN_CANCELLED' || cancelled) {
+      throw new Error('SCAN_CANCELLED');
+    }
+    disposeWorker();
+    throw error;
   } finally {
-    await Promise.all([fasWorker.terminate(), biWorker.terminate()]).catch(() => {});
+    activeCancel = null;
+    activeProgress = null;
   }
 }
 
 export async function scanReceiptHybrid(params: {
   file?: File | null;
   sampleId?: string | null;
-  dataUrl?: string | null;
-  serverUrl: string;
-  serverOnline: boolean;
+  imageUrl?: string | null;
+  language?: ReceiptOcrLanguage;
   shoppingItems: ShoppingItem[];
   onProgress?: (stage: string, pct: number, previewUrl?: string) => void;
 }): Promise<ScanResponse> {
-  const { file, sampleId, dataUrl, serverUrl, serverOnline, shoppingItems, onProgress } = params;
-  const aiSettings = getCloudVisionSettings();
+  const { file, sampleId, imageUrl, language = 'fa-en', shoppingItems, onProgress } = params;
+  cancelRequested = false;
+  const source: File | Blob | string =
+    file || imageUrl || assetUrl(`samples/sample-${sampleId || 'ofogh'}.png`);
 
-  onProgress?.('آماده‌سازی و بهینه‌سازی رزولوشن عکس فاکتور...', 8);
-  const resolvedSource: File | string =
-    file || dataUrl || assetUrl(`samples/sample-${sampleId || 'ofogh'}.png`);
-  const { compressedFile, previewDataUrl } = await normalizeAndCompressReceiptPhoto(resolvedSource);
-  onProgress?.('تصویر آماده شد؛ شروع پردازش بینایی ماشین...', 18, previewDataUrl);
-
-  // Layer 1: Optional Cloud Multimodal AI via Supabase Edge Function `scan-receipt`
-  if (aiSettings.enabled && aiSettings.apiKey.trim().length > 10) {
-    try {
-      onProgress?.(
-        `تحلیل هوشمند با ${
-          aiSettings.provider === 'openai' ? 'GPT-4o Vision' : 'Gemini 2.5 Flash'
-        }...`,
-        45,
-        previewDataUrl
-      );
-      const started = Date.now();
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 20000);
-      const edgeResp = await fetch(`${SUPABASE_URL}/functions/v1/scan-receipt`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        signal: ctrl.signal,
-        body: JSON.stringify({
-          imageBase64: previewDataUrl,
-          provider: aiSettings.provider,
-          apiKey: aiSettings.apiKey.trim(),
-          shoppingItems,
-        }),
-      });
-      clearTimeout(timer);
-      const edgeJson = await edgeResp.json();
-      if (edgeResp.ok && edgeJson.usedCloudAi && edgeJson.receipt) {
-        const recItems = edgeJson.receipt.items || [];
-        const reconciliation = reconcileReceiptWithShoppingList(recItems, shoppingItems);
-        onProgress?.('تکمیل شد!', 100, previewDataUrl);
-        return {
-          ok: true,
-          engine: edgeJson.engine,
-          durationMs: Date.now() - started,
-          originalImageUrl: previewDataUrl,
-          processedImageUrl: previewDataUrl,
-          perspectiveCropped: true,
-          lineBoxes: [],
-          rawOcrText: JSON.stringify(edgeJson.receipt, null, 2),
-          receipt: {
-            ...edgeJson.receipt,
-            ocr_engine: edgeJson.engine,
-            image_url: previewDataUrl,
-          },
-          reconciliation,
-        };
-      }
-    } catch (err) {
-      console.warn('[HybridCV] Cloud AI fallback to OpenCV + Neural OCR:', err);
-    }
+  onProgress?.('فشرده‌سازی عکس و آماده‌سازی فاکتور روی گوشی...', 8);
+  const prepared = await normalizeAndCompressReceiptPhoto(source);
+  if (cancelRequested) {
+    URL.revokeObjectURL(prepared.previewUrl);
+    throw new Error('SCAN_CANCELLED');
   }
-
-  // Layer 2: Live Full-Stack Python OpenCV 5.0 + Dual-Head Persian LSTM Server
-  const isCapacitorLocalOrigin =
-    serverUrl.startsWith('capacitor://') ||
-    serverUrl === 'http://localhost' ||
-    serverUrl === 'https://localhost' ||
-    serverUrl.includes('.github.io');
-
-  if (serverOnline && !isCapacitorLocalOrigin) {
-    try {
-      onProgress?.(
-        'حذف سایه با OpenCV 5.0 و خوانش دوگانه شبکه عصبی فارسی روی سرور...',
-        52,
-        previewDataUrl
-      );
-      const endpoint = `${serverUrl.replace(/\/$/, '')}/api/scan`;
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 20000);
-
-      let resp: Response;
-      if (sampleId) {
-        resp = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: ctrl.signal,
-          body: JSON.stringify({ sampleId, shoppingItems }),
-        });
-      } else {
-        const form = new FormData();
-        form.append('receipt', compressedFile);
-        form.append('shoppingItems', JSON.stringify(shoppingItems));
-        resp = await fetch(endpoint, {
-          method: 'POST',
-          signal: ctrl.signal,
-          body: form,
-        });
-      }
-      clearTimeout(timer);
-
-      const contentType = resp.headers.get('content-type') || '';
-      if (resp.ok && contentType.includes('application/json')) {
-        const result = (await resp.json()) as ScanResponse;
-        if (result.ok) {
-          const base = serverUrl.replace(/\/$/, '');
-          result.originalImageUrl = result.originalImageUrl?.startsWith('/')
-            ? `${base}${result.originalImageUrl}`
-            : previewDataUrl;
-          result.processedImageUrl = result.processedImageUrl?.startsWith('/')
-            ? `${base}${result.processedImageUrl}`
-            : previewDataUrl;
-          result.receipt.image_url = previewDataUrl;
-          result.receipt.processed_image_url = result.processedImageUrl;
-          result.receipt.raw_ocr_text = result.rawOcrText;
-          onProgress?.('تکمیل شد!', 100, previewDataUrl);
-          return result;
-        }
-      }
-    } catch (err) {
-      console.warn('[HybridCV] Server unreachable, seamlessly running On-Device Neural OCR:', err);
-    }
-  }
-
-  // Layer 3: Autonomous On-Device Dual-Head Persian WASM OCR (100% standalone on GitHub Pages & APK!)
-  return await runOnDeviceAutonomousScan(previewDataUrl, shoppingItems, (stage, pct) =>
-    onProgress?.(stage, pct, previewDataUrl)
+  onProgress?.(
+    `عکس بهینه شد (${Math.max(1, Math.round(prepared.sizeBytes / 1024))} کیلوبایت)؛ شروع اسکن آفلاین...`,
+    18,
+    prepared.previewUrl
   );
+
+  try {
+    return await runOnDeviceAutonomousScan(
+      prepared.compressedFile,
+      prepared.previewUrl,
+      prepared.width,
+      prepared.height,
+      shoppingItems,
+      language,
+      (stage, percent) => onProgress?.(stage, percent, prepared.previewUrl)
+    );
+  } catch (error) {
+    // The caller owns and can reuse the compressed preview after a timeout to retry without
+    // reopening the camera. Do not revoke the URL here.
+    throw error;
+  }
 }

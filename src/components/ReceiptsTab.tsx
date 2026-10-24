@@ -10,7 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import type { Receipt } from '../types';
-import { formatToman, toPersianDigits } from '../lib/persianMatcher';
+import { formatCurrency, toPersianDigits } from '../lib/persianMatcher';
 
 interface ReceiptsTabProps {
   receipts: Receipt[];
@@ -78,11 +78,11 @@ export function ReceiptsTab({
 
               <div className="text-left shrink-0">
                 <div className="text-base font-extrabold text-slate-900 tabular-fa">
-                  {formatToman(rec.total_amount)}
+                  {formatCurrency(rec.total_amount, rec.currency)}
                 </div>
                 {Number(rec.discount_total) > 0 && (
                   <span className="inline-block mt-0.5 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 tabular-fa">
-                    {formatToman(rec.discount_total, false)} تخفیف
+                    {formatCurrency(rec.discount_total, rec.currency, false)} تخفیف
                   </span>
                 )}
               </div>
@@ -210,14 +210,14 @@ export function ReceiptsTab({
                     <div className="col-span-6 font-bold text-slate-800 pl-2">
                       {item.name}
                       <span className="block text-[10px] font-normal text-slate-400">
-                        فی: {formatToman(item.unit_price, false)}
+                        فی: {formatCurrency(item.unit_price, selectedReceipt.currency, false)}
                       </span>
                     </div>
                     <div className="col-span-2 text-center font-semibold text-slate-600">
                       {toPersianDigits(item.quantity)} {item.unit}
                     </div>
                     <div className="col-span-4 text-left font-extrabold text-slate-900">
-                      {formatToman(item.total_price, false)}
+                      {formatCurrency(item.total_price, selectedReceipt.currency, false)}
                     </div>
                   </div>
                 ))}
@@ -227,17 +227,17 @@ export function ReceiptsTab({
               <div className="space-y-2 rounded-2xl bg-slate-50 p-4 text-xs tabular-fa">
                 <div className="flex justify-between text-slate-600">
                   <span>جمع اقلام:</span>
-                  <span className="font-semibold">{formatToman(selectedReceipt.subtotal)}</span>
+                  <span className="font-semibold">{formatCurrency(selectedReceipt.subtotal, selectedReceipt.currency)}</span>
                 </div>
                 {Number(selectedReceipt.discount_total) > 0 && (
                   <div className="flex justify-between text-emerald-700 font-semibold">
                     <span>تخفیف فروشگاه:</span>
-                    <span>{formatToman(selectedReceipt.discount_total)}-</span>
+                    <span>{formatCurrency(selectedReceipt.discount_total, selectedReceipt.currency)}-</span>
                   </div>
                 )}
                 <div className="flex justify-between border-t border-slate-200 pt-2.5 text-sm font-extrabold text-slate-900">
                   <span>مبلغ نهایی پرداخت‌شده:</span>
-                  <span className="text-blue-600">{formatToman(selectedReceipt.total_amount)}</span>
+                  <span className="text-blue-600">{formatCurrency(selectedReceipt.total_amount, selectedReceipt.currency)}</span>
                 </div>
               </div>
 

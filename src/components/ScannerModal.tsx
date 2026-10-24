@@ -20,8 +20,9 @@ import {
 } from 'lucide-react';
 import type { ReceiptItem, ScanResponse, ShoppingItem, ShoppingList } from '../types';
 import { assetUrl } from '../lib/assetUrl';
+import { cancelActiveOcrScan, type ReceiptOcrLanguage } from '../lib/visionClient';
 import {
-  formatToman,
+  formatCurrency,
   inferItemCategory,
   reconcileReceiptWithShoppingList,
   toPersianDigits,
@@ -31,8 +32,6 @@ import { scanReceiptHybrid } from '../lib/visionClient';
 interface ScannerModalProps {
   isOpen: boolean;
   initialSampleId?: string | null;
-  serverUrl: string;
-  serverOnline: boolean;
   lists: ShoppingList[];
   activeListId: string;
   allShoppingItems: ShoppingItem[];
@@ -43,6 +42,7 @@ interface ScannerModalProps {
     editedStoreName: string;
     editedDate: string;
     editedDiscount: number;
+    editedTax: number;
     editedItems: ReceiptItem[];
     targetListId: string;
   }) => Promise<void>;
@@ -72,8 +72,6 @@ const BUILTIN_SAMPLES = [
 export function ScannerModal({
   isOpen,
   initialSampleId,
-  serverUrl,
-  serverOnline,
   lists,
   activeListId,
   allShoppingItems,
@@ -89,38 +87,56 @@ export function ScannerModal({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [ocrLanguage, setOcrLanguage] = useState<ReceiptOcrLanguage>('fa-en');
 
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
-  const [showOpenCvView, setShowOpenCvView] = useState(true);
   const [showBoxes, setShowBoxes] = useState(true);
   const [showRawOcr, setShowRawOcr] = useState(false);
 
   const [storeName, setStoreName] = useState('');
   const [jalaliDate, setJalaliDate] = useState('');
   const [discountTotal, setDiscountTotal] = useState(0);
+  const [taxTotal, setTaxTotal] = useState(0);
   const [items, setItems] = useState<ReceiptItem[]>([]);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
+  const scanInProgressRef = useRef(false);
+  const lastScanInputRef = useRef<{
+    file?: File | null;
+    sampleId?: string | null;
+    imageUrl?: string | null;
+  } | null>(null);
 
   const targetShoppingItems = allShoppingItems.filter((i) => i.list_id === activeListId);
 
   const stopCameraStream = () => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
     setCameraActive(false);
   };
 
+  const releasePreview = () => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setScanningPreviewUrl(null);
+  };
+
   useEffect(() => {
     if (!isOpen) {
       stopCameraStream();
+      cancelActiveOcrScan();
+      releasePreview();
       setStep('capture');
       setScanResult(null);
-      setScanningPreviewUrl(null);
       setErrorMsg(null);
+      lastScanInputRef.current = null;
       return;
     }
     if (initialSampleId) {
@@ -129,23 +145,34 @@ export function ScannerModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialSampleId]);
 
+  useEffect(
+    () => () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      cancelActiveOcrScan();
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    },
+    []
+  );
+
   const startLiveWebCamera = async () => {
     setCameraError(null);
     if (Capacitor.isNativePlatform()) {
       try {
         const photo = await CapCamera.getPhoto({
-          quality: 90,
-          width: 1600,
+          quality: 76,
+          width: 1440,
           allowEditing: false,
-          resultType: CameraResultType.DataUrl,
+          resultType: CameraResultType.Uri,
           source: CameraSource.Camera,
         });
-        if (photo.dataUrl) {
-          await executeScan({ dataUrl: photo.dataUrl });
-        }
+        const imageUrl = photo.webPath || (photo.path ? Capacitor.convertFileSrc(photo.path) : null);
+        if (imageUrl) await executeScan({ imageUrl });
+        else setCameraError('دوربین عکسی برنگرداند؛ لطفاً یک‌بار دیگر امتحان کن.');
         return;
       } catch (err: any) {
         if (String(err?.message || '').toLowerCase().includes('cancel')) return;
+        setCameraError('دوربین باز نشد. اگر اجازهٔ دوربین رد شده، از گالری عکس انتخاب کن.');
+        return;
       }
     }
 
@@ -179,68 +206,90 @@ export function ScannerModal({
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth || 1280;
     canvas.height = video.videoHeight || 960;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((value) => resolve(value), 'image/jpeg', 0.78)
+    );
     stopCameraStream();
-    await executeScan({ dataUrl });
+    if (!blob) {
+      setCameraError('عکس دوربین آماده نشد؛ دوباره عکس بگیر یا از گالری انتخاب کن.');
+      return;
+    }
+    await executeScan({ file: new File([blob], `receipt-${Date.now()}.jpg`, { type: 'image/jpeg' }) });
   };
 
   const pickFromGallery = async () => {
     if (Capacitor.isNativePlatform()) {
       try {
         const photo = await CapCamera.getPhoto({
-          quality: 90,
-          width: 1600,
+          quality: 76,
+          width: 1440,
           allowEditing: false,
-          resultType: CameraResultType.DataUrl,
+          resultType: CameraResultType.Uri,
           source: CameraSource.Photos,
         });
-        if (photo.dataUrl) {
-          await executeScan({ dataUrl: photo.dataUrl });
-        }
+        const imageUrl = photo.webPath || (photo.path ? Capacitor.convertFileSrc(photo.path) : null);
+        if (imageUrl) await executeScan({ imageUrl });
         return;
       } catch (err: any) {
         if (String(err?.message || '').toLowerCase().includes('cancel')) return;
+        setCameraError('عکس از گالری خوانده نشد؛ لطفاً یک عکس دیگر انتخاب کن.');
+        return;
       }
     }
     fileInputRef.current?.click();
   };
 
-  const executeScan = async (input: {
-    file?: File | null;
-    sampleId?: string | null;
-    dataUrl?: string | null;
-  }) => {
+  const executeScan = async (
+    input: { file?: File | null; sampleId?: string | null; imageUrl?: string | null },
+    retrying = false
+  ) => {
+    if (scanInProgressRef.current) return;
+    scanInProgressRef.current = true;
+    if (!retrying) lastScanInputRef.current = input;
+    releasePreview();
     setErrorMsg(null);
     setProgressPct(8);
-    setStageMessage('بهینه‌سازی ابعاد و کنتراست عکس فاکتور...');
+    setStageMessage('فشرده‌سازی عکس و آماده‌سازی اسکن آفلاین...');
     setStep('scanning');
 
     try {
       const result = await scanReceiptHybrid({
         ...input,
-        serverUrl,
-        serverOnline,
+        language: ocrLanguage,
         shoppingItems: targetShoppingItems,
         onProgress: (msg, pct, previewUrl) => {
           setStageMessage(msg);
           setProgressPct(pct);
-          if (previewUrl) setScanningPreviewUrl(previewUrl);
+          if (previewUrl && previewUrlRef.current !== previewUrl) {
+            if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+            previewUrlRef.current = previewUrl;
+            setScanningPreviewUrl(previewUrl);
+          }
         },
       });
 
       setScanResult(result);
       setStoreName(result.receipt.store_name);
-      setJalaliDate(result.receipt.jalali_date || '۱۴۰۵/۰۸/۰۱');
+      setJalaliDate(result.receipt.jalali_date);
       setDiscountTotal(result.receipt.discount_total || 0);
+      setTaxTotal(result.receipt.tax_total || 0);
       setItems(result.receipt.items || []);
       setShowRawOcr((result.receipt.items || []).length === 0);
       setStep('review');
     } catch (err: any) {
-      setErrorMsg(err?.message || 'خطا در خوانش تصویر فاکتور. لطفاً دوباره امتحان کنید.');
+      if (err?.message === 'SCAN_CANCELLED') {
+        setErrorMsg(null);
+      } else if (err?.message === 'SCAN_TIMEOUT') {
+        setErrorMsg('پردازش این عکس در یک دقیقه تمام نشد. عکس فشرده و روی گوشی می‌ماند؛ می‌توانی دوباره تلاش کنی یا آن را در گالری برش بدهی.');
+      } else {
+        setErrorMsg(err?.message || 'خواندن فاکتور ناموفق بود. عکس را روشن‌تر یا صاف‌تر بگیر و دوباره تلاش کن.');
+      }
       setStep('capture');
+    } finally {
+      scanInProgressRef.current = false;
     }
   };
 
@@ -254,11 +303,17 @@ export function ScannerModal({
       }))
     );
     setDiscountTotal((d) => Math.round(d * factor));
+    setTaxTotal((tax) => Math.round(tax * factor));
   };
 
   const liveReconciliation = reconcileReceiptWithShoppingList(items, targetShoppingItems);
   const liveSubtotal = items.reduce((s, it) => s + Number(it.total_price || 0), 0);
-  const liveGrandTotal = Math.max(0, liveSubtotal - Number(discountTotal || 0));
+  const liveGrandTotal = Math.max(
+    0,
+    liveSubtotal - Number(discountTotal || 0) + Number(taxTotal || 0)
+  );
+  const resultCurrency = scanResult?.receipt.currency || 'تومان';
+  const isLiraCurrency = /(?:لیر|₺|\bTRY\b|\bTL\b)/i.test(resultCurrency);
 
   const updateItemField = (index: number, patch: Partial<ReceiptItem>) => {
     setItems((prev) =>
@@ -285,6 +340,7 @@ export function ScannerModal({
         editedStoreName: storeName.trim() || 'فروشگاه',
         editedDate: jalaliDate,
         editedDiscount: discountTotal,
+        editedTax: taxTotal,
         editedItems: items,
         targetListId: activeListId,
       });
@@ -330,6 +386,7 @@ export function ScannerModal({
               type="button"
               onClick={() => {
                 stopCameraStream();
+                cancelActiveOcrScan();
                 onClose();
               }}
               className="rounded-full bg-slate-100 p-2 text-slate-600 hover:bg-slate-200 cursor-pointer"
@@ -341,8 +398,17 @@ export function ScannerModal({
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
             {errorMsg && (
-              <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3.5 text-xs font-semibold text-rose-800">
-                {errorMsg}
+              <div className="flex items-start justify-between gap-3 rounded-2xl bg-rose-50 border border-rose-200 p-3.5 text-xs font-semibold text-rose-800">
+                <span className="leading-6">{errorMsg}</span>
+                {lastScanInputRef.current && (
+                  <button
+                    type="button"
+                    onClick={() => void executeScan(lastScanInputRef.current || {}, true)}
+                    className="shrink-0 rounded-xl bg-white px-3 py-2 text-[11px] font-extrabold text-rose-700 shadow-sm border border-rose-200"
+                  >
+                    تلاش دوباره
+                  </button>
+                )}
               </div>
             )}
 
@@ -385,6 +451,20 @@ export function ScannerModal({
                   </div>
                 ) : (
                   <div className="rounded-3xl bg-white p-5 border border-slate-200/80 shadow-2xs space-y-4">
+                    <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                      <span>
+                        <span className="block text-xs font-extrabold text-slate-800">زبان فاکتور</span>
+                        <span className="mt-0.5 block text-[10px] text-slate-500">انتخاب زبان مناسب، خوانش را سریع‌تر و دقیق‌تر می‌کند.</span>
+                      </span>
+                      <select
+                        value={ocrLanguage}
+                        onChange={(event) => setOcrLanguage(event.target.value as ReceiptOcrLanguage)}
+                        className="max-w-[160px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500"
+                      >
+                        <option value="fa-en">فارسی + انگلیسی</option>
+                        <option value="tr-en">ترکی + انگلیسی</option>
+                      </select>
+                    </label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <button
                         type="button"
@@ -435,7 +515,7 @@ export function ScannerModal({
                   <div className="flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-blue-600" />
                     <h3 className="text-xs font-extrabold text-slate-900">
-                      تست فوری با تصاویر فاکتور فروشگاهی (پردازش زنده OpenCV + OCR فارسی)
+                      تمرین اسکن آفلاین با چند فاکتور نمونه
                     </h3>
                   </div>
 
@@ -504,7 +584,10 @@ export function ScannerModal({
 
                 <button
                   type="button"
-                  onClick={() => setStep('capture')}
+                  onClick={() => {
+                    cancelActiveOcrScan();
+                    setStep('capture');
+                  }}
                   className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 cursor-pointer"
                 >
                   لغو و انتخاب تصویر دیگر
@@ -525,13 +608,6 @@ export function ScannerModal({
                       </span>
 
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => setShowOpenCvView((v) => !v)}
-                          className="rounded-lg bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-200 cursor-pointer"
-                        >
-                          {showOpenCvView ? 'خروجی OpenCV' : 'عکس اصلی'}
-                        </button>
                         {scanResult.lineBoxes.length > 0 && (
                           <button
                             type="button"
@@ -559,11 +635,7 @@ export function ScannerModal({
                     <div className="relative max-h-60 overflow-y-auto rounded-2xl bg-slate-900/5 border border-slate-200">
                       <div className="relative w-full">
                         <img
-                          src={
-                            showOpenCvView
-                              ? scanResult.processedImageUrl || scanResult.originalImageUrl
-                              : scanResult.originalImageUrl || scanResult.processedImageUrl
-                          }
+                          src={scanResult.processedImageUrl || scanResult.originalImageUrl}
                           alt="Scanned Receipt"
                           className="w-full h-auto block rounded-xl"
                         />
@@ -679,7 +751,8 @@ export function ScannerModal({
                   </div>
 
                   {/* Quick Rial <-> Toman Helper Bar */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 border border-slate-200/70">
+                  {!isLiraCurrency && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 border border-slate-200/70">
                     <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
                       <ArrowLeftRight className="h-3.5 w-3.5 text-blue-600" />
                       اصلاح سریع واحد پول مبالغ:
@@ -701,6 +774,7 @@ export function ScannerModal({
                       </button>
                     </div>
                   </div>
+                  )}
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -789,7 +863,7 @@ export function ScannerModal({
                             </div>
                             <div>
                               <span className="block text-[10px] text-slate-400 mb-0.5">
-                                قیمت واحد (تومان)
+                                قیمت واحد ({resultCurrency})
                               </span>
                               <input
                                 type="number"
@@ -803,10 +877,10 @@ export function ScannerModal({
                             </div>
                             <div>
                               <span className="block text-[10px] text-slate-400 mb-0.5">
-                                مبلغ کل (تومان)
+                                مبلغ کل ({resultCurrency})
                               </span>
                               <div className="rounded-lg bg-white border border-slate-200 px-2.5 py-1 font-extrabold text-blue-700">
-                                {formatToman(it.total_price, false)}
+                                {formatCurrency(it.total_price, resultCurrency, false)}
                               </div>
                             </div>
                           </div>
@@ -818,10 +892,10 @@ export function ScannerModal({
                   <div className="rounded-2xl bg-slate-50 p-3.5 space-y-2 text-xs tabular-fa border border-slate-200/60">
                     <div className="flex justify-between text-slate-600">
                       <span>جمع کل اقلام:</span>
-                      <span className="font-bold">{formatToman(liveSubtotal)}</span>
+                      <span className="font-bold">{formatCurrency(liveSubtotal, resultCurrency)}</span>
                     </div>
                     <div className="flex items-center justify-between text-emerald-700">
-                      <span>تخفیف فاکتور (تومان):</span>
+                      <span>تخفیف فاکتور ({resultCurrency}):</span>
                       <input
                         type="number"
                         step={1000}
@@ -830,9 +904,19 @@ export function ScannerModal({
                         className="w-28 rounded-lg bg-white border border-emerald-200 px-2 py-1 text-left font-bold text-emerald-700"
                       />
                     </div>
+                    <div className="flex items-center justify-between text-slate-600">
+                      <span>مالیات / عوارض ({resultCurrency}):</span>
+                      <input
+                        type="number"
+                        step={1000}
+                        value={taxTotal}
+                        onChange={(e) => setTaxTotal(Number(e.target.value))}
+                        className="w-28 rounded-lg bg-white border border-slate-200 px-2 py-1 text-left font-bold text-slate-700"
+                      />
+                    </div>
                     <div className="flex justify-between border-t border-slate-200 pt-2 text-sm font-extrabold text-slate-900">
                       <span>مبلغ قابل پرداخت:</span>
-                      <span className="text-blue-600">{formatToman(liveGrandTotal)}</span>
+                      <span className="text-blue-600">{formatCurrency(liveGrandTotal, resultCurrency)}</span>
                     </div>
                   </div>
                 </div>

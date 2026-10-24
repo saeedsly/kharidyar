@@ -1,139 +1,116 @@
-name: Build Signed Release Android APK & Publish Global Cloud Web App
+name: Build offline Android APK
 
 on:
   push:
     branches:
-      - '**'
+      - arena/6332d18e-kharidyar
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: read
 
 jobs:
-  build-and-publish-all:
-    name: Build Signed APK/AAB & Publish Global Web CDN
+  build-apk:
+    name: Build installable offline APK
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          cache: npm
 
-      - name: Setup Java 17 (Temurin)
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
-          cache: 'gradle'
+          cache: gradle
 
-      - name: Build Production Web Bundle & Sync Capacitor Android
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform and build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Build offline web assets and sync Capacitor
         run: |
-          npm ci
+          npm ci --no-audit --no-fund
           npm run build
-          cp dist/assets/index-*.css dist/app.css
-          cp dist/assets/index-*.js dist/app.js
           npx cap sync android
 
-      - name: Publish Web Bundle to Global Cloud HTTPS CDN
+      - name: Prepare APK signing key
+        id: signing
+        shell: bash
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.KHARIDYAR_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.KHARIDYAR_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.KHARIDYAR_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.KHARIDYAR_KEY_PASSWORD }}
         run: |
-          python3 - << 'PY'
-          import os, mimetypes, urllib.request
+          set -euo pipefail
+          store_file="$RUNNER_TEMP/kharidyar-release.jks"
 
-          SUPABASE_URL = "https://gngrgkrypvrgcnkldbhx.supabase.co"
-          ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImduZ3Jna3J5cHZyZ2Nua2xkYmh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTkyNzEsImV4cCI6MjEwODI3NTI3MX0.uHp5_u0ASWy5P0BVjppDC1h4MdXJ-0KgqJl_JkwSMQI"
+          if [[ -n "$RELEASE_KEYSTORE_BASE64" && -n "$RELEASE_STORE_PASSWORD" && -n "$RELEASE_KEY_ALIAS" && -n "$RELEASE_KEY_PASSWORD" ]]; then
+            printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$store_file"
+            store_password="$RELEASE_STORE_PASSWORD"
+            key_alias="$RELEASE_KEY_ALIAS"
+            key_password="$RELEASE_KEY_PASSWORD"
+            mode="stable-key"
+          else
+            store_file="$RUNNER_TEMP/kharidyar-test-only.jks"
+            store_password="$(openssl rand -hex 32)"
+            key_alias="kharidyar_test_only"
+            key_password="$store_password"
+            keytool -genkeypair -noprompt \
+              -keystore "$store_file" \
+              -storetype JKS \
+              -alias "$key_alias" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "$store_password" \
+              -keypass "$key_password" \
+              -dname "CN=KharidYar temporary test build"
+            mode="test-only-key"
+            echo "No persistent signing-key secrets configured; this APK is for a fresh test install only."
+          fi
 
-          MIME_OVERRIDES = {
-              ".js": "application/javascript",
-              ".mjs": "application/javascript",
-              ".css": "text/css",
-              ".wasm": "application/wasm",
-              ".gz": "application/gzip",
-              ".woff2": "font/woff2",
-              ".png": "image/png",
-              ".jpg": "image/jpeg",
-              ".json": "application/json",
-              ".html": "text/html; charset=utf-8",
-          }
+          {
+            echo "KHARIDYAR_STORE_FILE=$store_file"
+            echo "KHARIDYAR_STORE_PASSWORD=$store_password"
+            echo "KHARIDYAR_KEY_ALIAS=$key_alias"
+            echo "KHARIDYAR_KEY_PASSWORD=$key_password"
+            echo "KHARIDYAR_SIGNING_MODE=$mode"
+          } >> "$GITHUB_ENV"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
 
-          uploaded = 0
-          for root, _, files in os.walk("dist"):
-              for fname in files:
-                  full_path = os.path.join(root, fname)
-                  rel_path = os.path.relpath(full_path, "dist").replace("\\", "/")
-                  ext = os.path.splitext(fname)[1].lower()
-                  ctype = MIME_OVERRIDES.get(ext) or mimetypes.guess_type(fname)[0] or "application/octet-stream"
-                  with open(full_path, "rb") as f:
-                      body = f.read()
-                  req = urllib.request.Request(
-                      f"{SUPABASE_URL}/storage/v1/object/web-cdn/{rel_path}",
-                      data=body,
-                      method="POST",
-                      headers={
-                          "Authorization": f"Bearer {ANON_KEY}",
-                          "apikey": ANON_KEY,
-                          "Content-Type": ctype,
-                          "x-upsert": "true",
-                          "Cache-Control": "3600",
-                      },
-                  )
-                  with urllib.request.urlopen(req, timeout=30) as resp:
-                      assert resp.status in (200, 201), f"Upload failed for {rel_path}: {resp.status}"
-                  uploaded += 1
-          print(f"Uploaded {uploaded} production files to Global Cloud CDN!")
-          PY
-
-      - name: Generate Official RSA-2048 Release Keystore & Assemble Signed APK + Play Store AAB
+      - name: Assemble signed APK
         working-directory: android
         run: |
-          keytool -genkeypair -v \
-            -keystore kharidyar-release.jks \
-            -alias kharidyar_release \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass KharidYarSaeedSalari2026 \
-            -keypass KharidYarSaeedSalari2026 \
-            -dname "CN=Saeed Salari, OU=KharidYar Product Engineering, O=Saeed Salari, L=Madrid, ST=Madrid, C=ES"
+          chmod +x ./gradlew
+          version_code=$((7 + GITHUB_RUN_NUMBER))
+          ./gradlew --no-daemon --stacktrace assembleRelease \
+            -PKHARIDYAR_VERSION_CODE="$version_code"
+          mkdir -p ../apk-output
+          cp app/build/outputs/apk/release/app-release.apk \
+            "../apk-output/KharidYar-Android-v1.4.3-${KHARIDYAR_SIGNING_MODE}.apk"
 
-          chmod +x gradlew
-          ./gradlew assembleRelease bundleRelease --no-daemon \
-            -PKHARIDYAR_STORE_FILE="$PWD/kharidyar-release.jks" \
-            -PKHARIDYAR_STORE_PASSWORD=KharidYarSaeedSalari2026 \
-            -PKHARIDYAR_KEY_ALIAS=kharidyar_release \
-            -PKHARIDYAR_KEY_PASSWORD=KharidYarSaeedSalari2026
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -n "$apksigner"
+          "$apksigner" verify --verbose apk-output/*.apk
 
-          cp app/build/outputs/apk/release/app-release.apk ../KharidYar-v1.0.apk
-          cp app/build/outputs/bundle/release/app-release.aab ../KharidYar-PlayStore.aab
-
-          APKSIGNER_BIN=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
-          "$APKSIGNER_BIN" verify --print-certs ../KharidYar-v1.0.apk
-
-      - name: Upload Signed Release Artifacts
+      - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: KharidYar-Signed-Release-Packages
-          path: |
-            KharidYar-v1.0.apk
-            KharidYar-PlayStore.aab
+          name: KharidYar-Android-v1.4.3-${{ steps.signing.outputs.mode }}
+          path: apk-output/*.apk
           if-no-files-found: error
-
-      - name: Publish Signed APK & Google Play AAB to Public Release (v1.0.0)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release view v1.0.0 >/dev/null 2>&1 || gh release create v1.0.0 \
-            --title "خریدیـار (KharidYar) — نسخه رسمی امضاشده اندروید و Google Play" \
-            --notes "طراحی، توسعه و مالکیت انحصاری اثر: سعید سالاری (Saeed Salari) — https://www.linkedin.com/in/saeed-salariy/"
-          gh release upload v1.0.0 KharidYar-v1.0.apk KharidYar-PlayStore.aab --clobber
-
-      - name: Verify All Live Public Internet URLs Return HTTP 200
-        run: |
-          curl -fsSI "https://raw.githack.com/saeedsly/kharidyar/${{ github.ref_name }}/public/online.html" | head -n 5
-          curl -fsSI "https://raw.githack.com/saeedsly/kharidyar/${{ github.ref_name }}/public/privacy.html" | head -n 5
-          curl -fsSI "https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/app.js" | head -n 5
+          retention-days: 30

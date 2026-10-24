@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import QRCode from 'qrcode';
@@ -9,15 +9,15 @@ import {
   Download,
   ExternalLink,
   Home,
+  HardDrive,
   Linkedin,
   ListChecks,
   Maximize2,
   ReceiptText,
   ScanLine,
-  Server,
   Smartphone,
   Sparkles,
-  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import type { Receipt, ReceiptItem, ScanResponse, ShoppingItem, ShoppingList } from './types';
 import { assetUrl } from './lib/assetUrl';
@@ -28,13 +28,16 @@ import {
   deleteReceiptDb,
   deleteShoppingItemDb,
   fetchAllAppData,
+  readMonthlyBudget,
+  replaceLocalAppData,
   resetListReconciliationDb,
   saveScannedReceiptAndReconcileDb,
-  supabase,
-  syncOrDiscoverServerEndpoint,
   toggleShoppingItemDb,
+  updateShoppingItemDb,
   writeLocalStateMirror,
-} from './lib/supabase';
+  writeMonthlyBudget,
+  type LocalAppData,
+} from './lib/localStore';
 import { inferStoreCategory, toPersianDigits } from './lib/persianMatcher';
 import { DashboardTab } from './components/DashboardTab';
 import { ShoppingListTab } from './components/ShoppingListTab';
@@ -46,7 +49,7 @@ import { AboutOwnerModal, OWNER_LINKEDIN_URL } from './components/AboutOwnerModa
 type TabKey = 'dashboard' | 'list' | 'receipts' | 'connect';
 
 const GITHUB_RELEASE_APK_URL =
-  'https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-v1.0.apk';
+  'https://github.com/saeedsly/kharidyar/releases/download/v1.4.2/KharidYar-Android7-v1.4.2.apk';
 
 export default function App() {
   const isNative = Capacitor.isNativePlatform();
@@ -63,12 +66,8 @@ export default function App() {
 
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerSampleId, setScannerSampleId] = useState<string | null>(null);
-
-  const [serverUrl, setServerUrl] = useState<string>(() => window.location.origin);
-  const [serverOnline, setServerOnline] = useState<boolean>(false);
-  const [cloudConnected, setCloudConnected] = useState<boolean>(true);
-  const [cvEngine, setCvEngine] = useState<string>('Dual-Head Persian LSTM OCR');
-  const [apkDownloadUrl, setApkDownloadUrl] = useState<string>(GITHUB_RELEASE_APK_URL);
+  const [monthlyBudget, setMonthlyBudget] = useState<number>(() => readMonthlyBudget());
+  const [apkDownloadUrl] = useState<string>(GITHUB_RELEASE_APK_URL);
   const [sidebarQr, setSidebarQr] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -87,47 +86,21 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const refreshData = useCallback(async () => {
+  const refreshData = async () => {
     const data = await fetchAllAppData();
     setLists(data.lists);
     setItems(data.items);
     setReceipts(data.receipts);
-    setCloudConnected(data.cloudConnected);
-    setActiveListId((prev) => {
-      if (prev && data.lists.some((l) => l.id === prev)) return prev;
+    setActiveListId((previous) => {
+      if (previous && data.lists.some((list) => list.id === previous)) return previous;
       return data.lists[0]?.id || '';
     });
-  }, []);
-
-  const refreshConnection = useCallback(async () => {
-    const info = await syncOrDiscoverServerEndpoint(GITHUB_RELEASE_APK_URL);
-    setServerUrl(info.serverUrl);
-    setServerOnline(info.serverOnline);
-    setCvEngine(info.cvEngine);
-    setApkDownloadUrl(info.apkDownloadUrl);
-  }, []);
+  };
 
   useEffect(() => {
+    // Load device-local records immediately; app launch makes no network request.
     void refreshData();
-    void refreshConnection();
-
-    const channel = supabase
-      .channel('kharidyar-live-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' }, () => {
-        void refreshData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, () => {
-        void refreshData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_lists' }, () => {
-        void refreshData();
-      })
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [refreshData, refreshConnection]);
+  }, []);
 
   useEffect(() => {
     if (lists.length > 0 || receipts.length > 0) {
@@ -214,6 +187,11 @@ export default function App() {
     await deleteShoppingItemDb(itemId);
   };
 
+  const handleUpdateItem = async (itemId: string, patch: Partial<ShoppingItem>) => {
+    setItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...patch } : item)));
+    await updateShoppingItemDb(itemId, patch);
+  };
+
   const handleResetList = async () => {
     if (!activeList) return;
     setItems((prev) =>
@@ -235,10 +213,65 @@ export default function App() {
 
   const handleClearAllUserData = async () => {
     await clearAllWorkspaceDataDb();
+    writeMonthlyBudget(0);
+    setMonthlyBudget(0);
     setLists([]);
     setItems([]);
     setReceipts([]);
-    notify('تمامی داده‌های فضای کاری شما به صورت کامل حذف شد.');
+    notify('همهٔ اطلاعات این دستگاه پاک شد.');
+  };
+
+  const handleSaveMonthlyBudget = (amount: number) => {
+    const safeAmount = Number.isFinite(amount) && amount > 0 ? Math.round(amount) : 0;
+    writeMonthlyBudget(safeAmount);
+    setMonthlyBudget(safeAmount);
+    notify(safeAmount ? 'بودجهٔ ماهانه ذخیره شد.' : 'بودجهٔ ماهانه برداشته شد.');
+  };
+
+  const handleExportBackup = () => {
+    const payload = {
+      app: 'KharidYar',
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      monthlyBudget,
+      data: {
+        lists,
+        items,
+        receipts: receipts.map((receipt) => ({
+          ...receipt,
+          image_url: null,
+          processed_image_url: null,
+        })),
+      },
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `kharidyar-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    notify('نسخهٔ پشتیبان روی دستگاه آماده شد.');
+  };
+
+  const handleImportBackup = (data: LocalAppData, budget?: number) => {
+    const safeData: LocalAppData = {
+      ...data,
+      receipts: data.receipts.map((receipt) => ({
+        ...receipt,
+        image_url: null,
+        processed_image_url: null,
+      })),
+    };
+    replaceLocalAppData(safeData);
+    setLists(safeData.lists);
+    setItems(safeData.items);
+    setReceipts(safeData.receipts);
+    setActiveListId(safeData.lists[0]?.id || '');
+    const importedBudget = Number.isFinite(budget) && Number(budget) > 0 ? Math.round(Number(budget)) : 0;
+    writeMonthlyBudget(importedBudget);
+    setMonthlyBudget(importedBudget);
+    notify('پشتیبان بازیابی شد؛ اطلاعات فقط روی همین دستگاه ذخیره می‌شوند.');
   };
 
   const handleConfirmSaveReceipt = async (params: {
@@ -246,12 +279,16 @@ export default function App() {
     editedStoreName: string;
     editedDate: string;
     editedDiscount: number;
+    editedTax: number;
     editedItems: ReceiptItem[];
     targetListId: string;
   }) => {
     void triggerHaptic();
-    const subtotal = params.editedItems.reduce((s, i) => s + Number(i.total_price || 0), 0);
-    const totalAmount = Math.max(0, subtotal - Number(params.editedDiscount || 0));
+    const subtotal = params.editedItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
+    const totalAmount = Math.max(
+      0,
+      subtotal - Number(params.editedDiscount || 0) + Number(params.editedTax || 0)
+    );
 
     setItems((prev) =>
       prev.map((sItem) => {
@@ -281,11 +318,14 @@ export default function App() {
     const savedReceipt = await saveScannedReceiptAndReconcileDb({
       receipt: {
         ...params.scanResult.receipt,
+        image_url: null,
+        processed_image_url: null,
         store_name: params.editedStoreName,
         store_category: inferStoreCategory(params.editedStoreName),
         jalali_date: params.editedDate,
         subtotal,
         discount_total: params.editedDiscount,
+        tax_total: params.editedTax,
         total_amount: totalAmount,
         items: params.editedItems,
       },
@@ -353,8 +393,8 @@ export default function App() {
             onClick={() => setActiveTab('connect')}
             className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 text-[11px] font-bold text-emerald-800 cursor-pointer"
           >
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            {serverOnline ? 'متصل' : 'فعال'}
+            <WifiOff className="h-3.5 w-3.5" />
+            روی گوشی
           </button>
         </div>
       </header>
@@ -372,6 +412,8 @@ export default function App() {
             receipts={receipts}
             activeList={activeList}
             activeListItems={activeListItems}
+            monthlyBudget={monthlyBudget}
+            onSaveMonthlyBudget={handleSaveMonthlyBudget}
             onOpenScanner={openScanner}
             onGoToList={() => setActiveTab('list')}
             onGoToReceipts={() => setActiveTab('receipts')}
@@ -392,6 +434,7 @@ export default function App() {
             onCreateList={handleCreateList}
             onAddItem={handleAddItem}
             onToggleItem={handleToggleItem}
+            onUpdateItem={handleUpdateItem}
             onDeleteItem={handleDeleteItem}
             onResetList={handleResetList}
             onOpenScannerForList={openScanner}
@@ -409,13 +452,13 @@ export default function App() {
 
         {activeTab === 'connect' && (
           <ServerConnectTab
-            serverUrl={serverUrl}
-            serverOnline={serverOnline}
-            cloudConnected={cloudConnected}
-            cvEngine={cvEngine}
-            apkDownloadUrl={apkDownloadUrl}
-            onRefreshConnection={refreshConnection}
-            onWorkspaceChanged={refreshData}
+            lists={lists}
+            items={items}
+            receipts={receipts}
+            monthlyBudget={monthlyBudget}
+            onExportBackup={handleExportBackup}
+            onImportBackup={handleImportBackup}
+            onClearAllUserData={handleClearAllUserData}
             onOpenAboutOwner={() => setAboutModalOpen(true)}
           />
         )}
@@ -482,8 +525,8 @@ export default function App() {
               activeTab === 'connect' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
             }`}
           >
-            <Server className="h-5 w-5" />
-            <span>مالکیت و اپ</span>
+            <HardDrive className="h-5 w-5" />
+            <span>پشتیبان</span>
           </button>
         </div>
       </nav>
@@ -511,7 +554,7 @@ export default function App() {
               <div className="flex items-center gap-2.5">
                 <a
                   href={apkDownloadUrl}
-                  download="KharidYar-v1.0.apk"
+                  download="KharidYar-Android7-v1.4.2.apk"
                   className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1 font-bold hover:bg-blue-500"
                 >
                   <Download className="h-3.5 w-3.5" />
@@ -547,9 +590,9 @@ export default function App() {
 
             {/* Right-Hand Showcase + Founder Bio + LinkedIn + Download */}
             <div className="col-span-7 space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-xs font-bold text-blue-700 shadow-2xs border border-slate-200/80">
-                <Wifi className="h-3.5 w-3.5 text-emerald-500" />
-                سامانه رسمی و عمومی «خریدیـار» — نسخه وب، PWA و اندروید Release
+              <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-xs font-bold text-emerald-700 shadow-2xs border border-emerald-200/80">
+                <WifiOff className="h-3.5 w-3.5" />
+                خریدیـار روی دستگاه • بدون نیاز به اتصال اینترنت
               </div>
 
               <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-snug">
@@ -564,11 +607,8 @@ export default function App() {
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3.5">
                     <img
-                      src="https://avatars.githubusercontent.com/u/221086467?v=4"
-                      alt="سعید سالاری - Saeed Salari"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).src = assetUrl('icon-192.png');
-                      }}
+                      src={assetUrl('icon-192.png')}
+                      alt="نشان خریدیـار"
                       className="h-14 w-14 rounded-2xl object-cover border border-blue-200 bg-blue-50 shrink-0"
                     />
                     <div>
@@ -666,12 +706,12 @@ export default function App() {
                 <div className="space-y-2.5">
                   <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-700">
                     <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping" />
-                    نسخه Release امضاشده رسمی اندروید (سازگار با Google Play Protect)
+                    نسخهٔ عمومی فعلی اندروید • v1.4.2
                   </span>
                   <div className="flex flex-wrap items-center gap-2.5 pt-1">
                     <a
                       href={apkDownloadUrl}
-                      download="KharidYar-v1.0.apk"
+                      download="KharidYar-Android7-v1.4.2.apk"
                       className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-xs font-extrabold text-white shadow-sm shadow-blue-600/25 hover:bg-blue-700 transition"
                     >
                       <Download className="h-4 w-4" />
@@ -710,8 +750,6 @@ export default function App() {
       <ScannerModal
         isOpen={scannerOpen}
         initialSampleId={scannerSampleId}
-        serverUrl={serverUrl}
-        serverOnline={serverOnline}
         lists={lists}
         activeListId={activeList?.id || ''}
         allShoppingItems={items}

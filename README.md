@@ -1,16 +1,27 @@
-# خریدیـار (KharidYar) 🛒✨
+# خریدیـار (KharidYar) 🛒
 
-**اپلیکیشن هوشمند اسکن فاکتور با بینایی ماشین، ثبت خودکار اقلام و چک‌لیست ضد فراموشی خرید**
+**مدیریت آفلاین خرید، چک‌لیست اقلام و خواندن فاکتور روی خود دستگاه**
 
-- **خالق، طراح و صاحب امتیاز اثر:** **سعید سالاری (Saeed Salari)**
-- **پروفایل رسمی لینکدین:** [linkedin.com/in/saeed-salariy](https://www.linkedin.com/in/saeed-salariy/)
-- **نسخه زنده عمومی تحت وب (PWA):** [https://saeedsly.github.io/kharidyar/](https://saeedsly.github.io/kharidyar/)
-- **سیاست حفظ حریم خصوصی (استاندارد Google Play):** [Privacy Policy](https://saeedsly.github.io/kharidyar/privacy.html)
-- **دانلود مستقیم نسخه امضاشده اندروید (`Release APK`):** [KharidYar-v1.0.apk](https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-v1.0.apk)
-- **بسته رسمی بارگذاری در Google Play Console (`AAB`):** [KharidYar-PlayStore.aab](https://github.com/saeedsly/kharidyar/releases/download/v1.0.0/KharidYar-PlayStore.aab)
+- **سازنده و صاحب اثر:** سعید سالاری (Saeed Salari)
+- **وب‌سایت پروژه:** [saeedsly.github.io/kharidyar](https://saeedsly.github.io/kharidyar/)
+- **سیاست حریم خصوصی:** [Privacy Policy](https://saeedsly.github.io/kharidyar/privacy.html)
+- **آخرین APK عمومیِ شناخته‌شده:** [KharidYar-Android7-v1.4.2.apk](https://github.com/saeedsly/kharidyar/releases/download/v1.4.2/KharidYar-Android7-v1.4.2.apk)
 
----
+## ویژگی‌های نسخهٔ آفلاین
 
-## بیانیه مالکیت مادی و معنوی اثر
+- ثبت و ویرایش چک‌لیست، فاکتورها و بودجه در حافظهٔ خصوصی برنامه.
+- OCR فارسی و انگلیسی، و انتخاب زبان ترکی؛ مدل‌های OCR داخل APK هستند.
+- عکس فاکتور فقط برای همان اسکن، روی دستگاه فشرده و پردازش می‌شود؛ عکس در سابقه ذخیره یا به سرور فرستاده نمی‌شود.
+- گزارش ماهانه بر پایهٔ تقویم شمسی و تجمیع چند فاکتورِ یک روز.
+- خروجی و بازیابی پشتیبان JSON از داخل برنامه.
+- برنامهٔ Android برای اسکن و ثبت خرید به اتصال اینترنت نیاز ندارد و مجوز اینترنت درخواست نمی‌کند.
 
-تمامی حقوق مادی، معنوی و مالکیت فکری نرم‌افزار وب و موبایل **«خریدیـار | KharidYar»** — اعم از معماری نرم‌افزار، کدهای منبع، الگوریتم‌های بینایی ماشین و خوانش عصبی فاکتور، طراحی رابط کاربری و نام تجاری — محفوظ و به صورت انحصاری متعلق به **سعید سالاری (Saeed Salari)** می‌باشد. (`© 2026 Saeed Salari. All Rights Reserved.`)
+## ساخت نسخهٔ Android
+
+ساخت APK از گردش‌کار GitHub Actions انجام می‌شود. خروجی آن به شکل artifact همان اجرای workflow در دسترس است؛ این روند APK را به‌صورت خودکار در مخزن عمومی یا سرویس ابری منتشر نمی‌کند.
+
+تا زمانی که کلید امضای پایدار در GitHub Actions تنظیم نشده باشد، workflow از کلید موقت استفاده می‌کند و خروجی را `test-only-key` می‌نامد. چنین APKای برای نصب تازه و آزمایش است و نمی‌تواند روی نسخه‌ای با امضای دیگر به‌روزرسانی شود. برای انتشارهای قابل‌به‌روزرسانی باید کلید خصوصی پایدار و امن در GitHub Actions تنظیم شود؛ فایل کلید نباید در مخزن قرار گیرد.
+
+## مالکیت اثر
+
+تمام حقوق مادی و معنوی نرم‌افزار وب و موبایل **«خریدیـار | KharidYar»**، شامل کد منبع، الگوریتم‌های OCR، طراحی رابط و نام تجاری، متعلق به **سعید سالاری (Saeed Salari)** است. © 2026 Saeed Salari. All rights reserved.

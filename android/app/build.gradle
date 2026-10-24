@@ -1,5 +1,13 @@
 apply plugin: 'com.android.application'
 
+def signingStoreFile = project.findProperty('KHARIDYAR_STORE_FILE') ?: System.getenv('KHARIDYAR_STORE_FILE')
+def signingStorePassword = project.findProperty('KHARIDYAR_STORE_PASSWORD') ?: System.getenv('KHARIDYAR_STORE_PASSWORD')
+def signingKeyAlias = project.findProperty('KHARIDYAR_KEY_ALIAS') ?: System.getenv('KHARIDYAR_KEY_ALIAS')
+def signingKeyPassword = project.findProperty('KHARIDYAR_KEY_PASSWORD') ?: System.getenv('KHARIDYAR_KEY_PASSWORD')
+def hasReleaseSigning = [signingStoreFile, signingStorePassword, signingKeyAlias, signingKeyPassword]
+        .every { it != null && !it.toString().trim().isEmpty() }
+def releaseVersionCode = (project.findProperty('KHARIDYAR_VERSION_CODE') ?: '7').toString().toInteger()
+
 android {
     namespace "com.saeedsalari.kharidyar"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +15,8 @@ android {
         applicationId "com.saeedsalari.kharidyar"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.2.0"
+        versionCode releaseVersionCode
+        versionName "1.4.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
@@ -16,11 +24,11 @@ android {
     }
     signingConfigs {
         release {
-            if (project.hasProperty('KHARIDYAR_STORE_FILE')) {
-                storeFile file(project.property('KHARIDYAR_STORE_FILE'))
-                storePassword project.property('KHARIDYAR_STORE_PASSWORD')
-                keyAlias project.property('KHARIDYAR_KEY_ALIAS')
-                keyPassword project.property('KHARIDYAR_KEY_PASSWORD')
+            if (hasReleaseSigning) {
+                storeFile file(signingStoreFile.toString())
+                storePassword signingStorePassword.toString()
+                keyAlias signingKeyAlias.toString()
+                keyPassword signingKeyPassword.toString()
                 v1SigningEnabled true
                 v2SigningEnabled true
             }
@@ -31,7 +39,7 @@ android {
             minifyEnabled false
             shrinkResources false
             debuggable false
-            if (project.hasProperty('KHARIDYAR_STORE_FILE')) {
+            if (hasReleaseSigning) {
                 signingConfig signingConfigs.release
             }
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

@@ -4,6 +4,7 @@ import type {
   ReconciliationItemResult,
   ShoppingItem,
 } from '../types';
+import { getTodayJalaliDate, normalizeReceiptDate } from './jalaliDate';
 
 const PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
 const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
@@ -27,6 +28,22 @@ export function formatToman(amount: number | null | undefined, showUnit = true):
   const safe = Math.round(Number(amount || 0));
   const formatted = toPersianDigits(safe.toLocaleString('en-US'));
   return showUnit ? `${formatted} تومان` : formatted;
+}
+
+export function formatCurrency(
+  amount: number | null | undefined,
+  currency: string | null | undefined,
+  showUnit = true
+): string {
+  const currencyLabel = String(currency || '').trim();
+  if (/(لیر|₺|\bTRY\b|\bTL\b)/i.test(currencyLabel)) {
+    const safeAmount = Number(amount || 0);
+    const formatted = toPersianDigits(
+      safeAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    );
+    return showUnit ? `${formatted} لیر` : formatted;
+  }
+  return formatToman(amount, showUnit);
 }
 
 export function normalizePersianText(input: string): string {
@@ -95,7 +112,7 @@ const BRAND_AND_UNIT_STOPWORDS = new Set([
 export function extractCorePersianTokens(text: string): string[] {
   return normalizePersianText(text)
     .toLowerCase()
-    .replace(/[^\u0600-\u06FFa-z0-9\s]/g, ' ')
+    .replace(/[^\u0600-\u06FF\u00C0-\u024Fa-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter((t) => t.length > 1 && !BRAND_AND_UNIT_STOPWORDS.has(t) && !/^\d+$/.test(t));
 }
@@ -167,16 +184,29 @@ export interface NeuralLineInput {
   bbox?: BoundingBox;
 }
 
-const PRICE_TOKEN_REGEX = /\d{1,3}(?:[,،/]\d{3})+|\b\d{4,10}\b/g;
+const PRICE_TOKEN_REGEX =
+  /(?:\d{1,3}(?:\.\d{3})+,\d{2}|\d{1,3}(?:[,،/.]\d{3})+|\d{1,10}[,.]\d{2}|\b\d{4,10}\b)/g;
 
-function extractPricesFromText(line: string): number[] {
+function extractPricesFromText(line: string, liraHint = false): number[] {
   const norm = normalizePersianText(line);
-  // Remove dates like 1405/08/01 or 1404/11/23 first so year 1405 is never mistaken as a price!
-  const withoutDates = norm.replace(/\b(13\d{2}|14\d{2})[/\-]\d{1,2}[/\-]\d{1,2}\b/g, ' ');
+  // Remove Gregorian, Jalali and Turkish day-first dates before considering prices.
+  const withoutDates = norm.replace(
+    /\b(?:(?:13|14|19|20)\d{2}[/.-]\d{1,2}[/.-]\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.\-](?:13|14|19|20)\d{2})\b/g,
+    ' '
+  );
+  const hasLira = liraHint || /(₺|\bTRY\b|\bTL\b|\blira\b)/i.test(withoutDates);
   const matches = withoutDates.match(PRICE_TOKEN_REGEX) || [];
   return matches
-    .map((raw) => Number(raw.replace(/[,،/\s]/g, '')))
-    .filter((v) => Number.isFinite(v) && v >= 1000 && v <= 9_999_999_999);
+    .map((raw) => {
+      if (hasLira && /^\d{1,3}(?:\.\d{3})+,\d{2}$/.test(raw)) {
+        return Number(raw.replace(/\./g, '').replace(',', '.'));
+      }
+      if (hasLira && /^\d{1,10}[,.]\d{2}$/.test(raw)) {
+        return Number(raw.replace(',', '.'));
+      }
+      return Number(raw.replace(/[,،/.\s]/g, ''));
+    })
+    .filter((value) => Number.isFinite(value) && value > 0 && (value >= 1000 || hasLira) && value <= 9_999_999_999);
 }
 
 /**
@@ -249,7 +279,7 @@ export function fuseDualHeadLines(lines: NeuralLineInput[]): string[] {
 }
 
 const IGNORE_HEADER_KEYWORDS =
-  /(تاریخ|شماره\s*فاکتور|شماره\s*فیش|نام\s*کالا|شرح\s*کالا|قیمت\s*واحد|فی\s*واحد|مبلغ\s*کل|صندوق\s*شماره|سپاسگزاریم|سامانه\s*هوشمند|تلفن|آدرس|کد\s*پستی|شناسه\s*ملی|کارتخوان|ترمینال|رهگیری)/;
+  /(تاریخ|شماره\s*فاکتور|شماره\s*فیش|نام\s*کالا|شرح\s*کالا|قیمت\s*واحد|فی\s*واحد|مبلغ\s*کل|صندوق\s*شماره|سپاسگزاریم|سامانه\s*هوشمند|تلفن|آدرس|کد\s*پستی|شناسه\s*ملی|کارتخوان|ترمینال|رهگیری|date|invoice\s*(?:no|number)|item\s*name|unit\s*price|quantity|\bsubtotal\b|\btotal\b|\bdiscount\b|\bamount\b|\bprice\b|tel|address|tarih|fi[sş]\s*(?:no|numarası)|ürün\s*adı|birim\s*fiyat|adet|telefon|adres|\btoplam\b|\bindirim\b|\btutar\b)/i;
 
 /**
  * Universal Iranian Receipt NLP Parser v2
@@ -269,9 +299,14 @@ export function parsePersianReceiptText(
     .filter((l) => l.length > 1);
 
   const fullText = rawLines.join('\n');
+  const explicitLira = /(₺|\bTRY\b|\bTL\b|\blira\b)/i.test(fullText);
+  const explicitToman = /(تومان|تومن)/.test(fullText);
+  const explicitRial = /ریال/.test(fullText) && !explicitToman && !explicitLira;
+  const roundForCurrency = (amount: number) =>
+    explicitLira ? Math.round(amount * 100) / 100 : Math.round(amount);
 
   let storeName = '';
-  let jalaliDate = '۱۴۰۵/۰۸/۰۱';
+  let jalaliDate = getTodayJalaliDate();
   let receiptNumber = `KY-${Math.floor(10000 + Math.random() * 89999)}`;
   let rawSubtotal = 0;
   let rawDiscount = 0;
@@ -293,12 +328,8 @@ export function parsePersianReceiptText(
   for (let idx = 0; idx < rawLines.length; idx++) {
     const line = rawLines[idx];
 
-    const dateMatch = line.match(/(13\d{2}|14\d{2})[/\-](\d{1,2})[/\-](\d{1,2})/);
-    if (dateMatch) {
-      jalaliDate = toPersianDigits(
-        `${dateMatch[1]}/${dateMatch[2].padStart(2, '0')}/${dateMatch[3].padStart(2, '0')}`
-      );
-    }
+    const normalizedDate = normalizeReceiptDate(line);
+    if (normalizedDate) jalaliDate = toPersianDigits(normalizedDate.replace(/-/g, '/'));
 
     const serialMatch = line.match(
       /(?:شماره\s*فاکتور|شماره\s*فیش|فاکتور|سریال)\s*[:：]?\s*([A-Za-z0-9\-]{2,16})/
@@ -311,39 +342,38 @@ export function parsePersianReceiptText(
       !storeName &&
       idx <= 4 &&
       !IGNORE_HEADER_KEYWORDS.test(line) &&
-      extractPricesFromText(line).length === 0
+      extractPricesFromText(line, explicitLira).length === 0
     ) {
-      const cleanedTitle = line.replace(/^[^آ-یa-zA-Z]+/, '').trim();
+      const cleanedTitle = line.replace(/^[^\u0600-\u06FF\u00C0-\u024Fa-zA-Z]+/, '').trim();
       if (cleanedTitle.length >= 3) {
         storeName = cleanedTitle;
         continue;
       }
     }
 
-    if (IGNORE_HEADER_KEYWORDS.test(line) || /^شعبه\s/.test(line)) {
+    const linePrices = extractPricesFromText(line, explicitLira);
+    if ((IGNORE_HEADER_KEYWORDS.test(line) && linePrices.length === 0) || /^شعبه\s/.test(line)) {
       pendingProductTitle = null;
       continue;
     }
 
-    const linePrices = extractPricesFromText(line);
-
-    // Check summary rows (جمع کل / تخفیف / مالیات / قابل پرداخت)
-    if (/^(جمع اقلام|جمع فاکتور|جمع کل اقلام)/.test(line) && linePrices.length) {
+    // Summary labels commonly printed on Persian, English and Turkish thermal receipts.
+    if (/^(جمع اقلام|جمع فاکتور|جمع کل اقلام|sub\s*total|subtotal|ara toplam)/i.test(line) && linePrices.length) {
       rawSubtotal = linePrices[linePrices.length - 1];
       pendingProductTitle = null;
       continue;
     }
-    if (/(تخفیف|سود شما)/.test(line) && linePrices.length) {
+    if (/(تخفیف|سود شما|discount|indirim|iskonto)/i.test(line) && linePrices.length) {
       rawDiscount = linePrices[linePrices.length - 1];
       pendingProductTitle = null;
       continue;
     }
-    if (/(مالیات|ارزش افزوده)/.test(line) && linePrices.length) {
+    if (/(مالیات|ارزش افزوده|tax|vat|kdv|vergi)/i.test(line) && linePrices.length) {
       rawTax = linePrices[linePrices.length - 1];
       pendingProductTitle = null;
       continue;
     }
-    if (/(قابل پرداخت|جمع کل|مبلغ نهایی|پرداختی|خالص پرداختی)/.test(line) && linePrices.length) {
+    if (/(قابل پرداخت|جمع کل|مبلغ نهایی|پرداختی|خالص پرداختی|amount due|grand total|total paid|\btotal\b|payable|toplam|ödenecek|tutar)/i.test(line) && linePrices.length) {
       rawTotal = linePrices[linePrices.length - 1];
       pendingProductTitle = null;
       continue;
@@ -366,7 +396,7 @@ export function parsePersianReceiptText(
             quantity = Number(qm[1]) || 1;
             unit = qm[2];
           } else {
-            const pNums = extractPricesFromText(p);
+            const pNums = extractPricesFromText(p, explicitLira);
             priceParts.push(...pNums);
           }
         }
@@ -374,14 +404,14 @@ export function parsePersianReceiptText(
         if (priceParts.length >= 1) {
           let unitPrice = Math.min(...priceParts);
           let totalPrice = Math.max(...priceParts);
-          if (priceParts.length >= 2 && Math.abs(quantity * unitPrice - totalPrice) > 50) {
-            if (quantity > 1 && Math.round(totalPrice / quantity) >= 1000) {
-              unitPrice = Math.round(totalPrice / quantity);
+          if (priceParts.length >= 2 && Math.abs(quantity * unitPrice - totalPrice) > (explicitLira ? 0.05 : 50)) {
+            if (quantity > 1 && totalPrice / quantity >= (explicitLira ? 0.01 : 1000)) {
+              unitPrice = roundForCurrency(totalPrice / quantity);
             } else {
-              totalPrice = Math.round(quantity * unitPrice);
+              totalPrice = roundForCurrency(quantity * unitPrice);
             }
           } else if (priceParts.length === 1) {
-            unitPrice = quantity > 0 ? Math.round(totalPrice / quantity) : totalPrice;
+            unitPrice = quantity > 0 ? roundForCurrency(totalPrice / quantity) : totalPrice;
           }
 
           rawItems.push({
@@ -398,10 +428,10 @@ export function parsePersianReceiptText(
       }
     }
 
-    // Case B: Line has NO prices, only Persian item words -> save for 2-line POS thermal receipt!
+    // Case B: Price-free product titles are held for the next row on narrow thermal receipts.
     if (linePrices.length === 0) {
-      const persianChars = (line.match(/[\u0600-\u06FF]/g) || []).length;
-      if (persianChars >= 3 && idx > 0) {
+      const letters = (line.match(/[\u0600-\u06FF\u00C0-\u024Fa-zA-Z]/g) || []).length;
+      if (letters >= 3 && idx > 0) {
         pendingProductTitle = {
           text: line.replace(/^\d+\s*[-–.)]\s*/, '').trim(),
           bbox: lineBoxes[idx] || null,
@@ -410,15 +440,16 @@ export function parsePersianReceiptText(
       continue;
     }
 
-    // Case C: Line HAS prices! Extract Persian words (or pair with `pendingProductTitle`!)
+    // Case C: A priced row may contain Persian, English or Turkish product names.
     const persianPart = line
       .replace(PRICE_TOKEN_REGEX, ' ')
+      .replace(/₺|\b(?:TRY|TL|LIRA|LIRASI)\b/gi, ' ')
       .replace(/^\d+\s*[-–.)]\s*/, '')
       .replace(/[*×=:\-|]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
-    const persianLetterCount = (persianPart.match(/[\u0600-\u06FF]/g) || []).length;
+    const persianLetterCount = (persianPart.match(/[\u0600-\u06FF\u00C0-\u024Fa-zA-Z]/g) || []).length;
 
     let finalName = '';
     let itemBbox: BoundingBox | null = lineBoxes[idx] || null;
@@ -427,18 +458,18 @@ export function parsePersianReceiptText(
 
     // Extract small quantity number like `2 *` or `3 عدد`
     const qtyMatch = line.match(
-      /(?:^|\s)(\d{1,2}(?:\.\d+)?)\s*(?:\*|×|عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر)(?=\s|\d|$)/
+      /(?:^|\s)(\d{1,2}(?:\.\d+)?)\s*(?:\*|×|عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)(?=\s|\d|$)/i
     );
     if (qtyMatch) {
       const qv = Number(qtyMatch[1]);
       if (qv > 0 && qv <= 60) quantity = qv;
-      const unitWord = line.match(/(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر)/);
+      const unitWord = line.match(/(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)/i);
       if (unitWord) unit = unitWord[1];
     }
 
     if (persianLetterCount >= 2) {
       finalName = persianPart
-        .replace(/\b(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر)\b/g, '')
+        .replace(/\b(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)\b/gi, '')
         .replace(/\b\d+\b/g, '')
         .replace(/\s+/g, ' ')
         .trim();
@@ -453,7 +484,7 @@ export function parsePersianReceiptText(
       let unitPrice = Math.min(...linePrices);
       let totalPrice = Math.max(...linePrices);
       if (linePrices.length === 1) {
-        unitPrice = quantity > 0 ? Math.round(totalPrice / quantity) : totalPrice;
+        unitPrice = quantity > 0 ? roundForCurrency(totalPrice / quantity) : totalPrice;
       } else if (quantity === 1 && totalPrice > unitPrice && totalPrice % unitPrice === 0) {
         const inferredQty = totalPrice / unitPrice;
         if (inferredQty >= 2 && inferredQty <= 24) {
@@ -475,24 +506,23 @@ export function parsePersianReceiptText(
   // Smart Rial vs Toman Auto-Detection!
   // 1) Explicit "ریال" without "تومان" -> convert ÷10
   // 2) Implicit POS Rial receipt (no "تومان" written anywhere, all prices end in 0, and median price >= 350,000) -> convert ÷10!
-  const explicitToman = /(تومان|تومن)/.test(fullText);
-  const explicitRial = /ریال/.test(fullText) && !explicitToman;
   const allItemTotals = rawItems.map((i) => i.totalPrice).sort((a, b) => a - b);
   const medianPrice = allItemTotals.length
     ? allItemTotals[Math.floor(allItemTotals.length / 2)]
     : 0;
   const allEndWithZero =
     allItemTotals.length > 0 && allItemTotals.every((p) => p % 10 === 0);
-  const implicitRial = !explicitToman && allEndWithZero && medianPrice >= 350_000;
+  const implicitRial = !explicitToman && !explicitLira && allEndWithZero && medianPrice >= 350_000;
 
   const scale = explicitRial || implicitRial ? 0.1 : 1;
 
+  const roundReceiptAmount = (amount: number) => roundForCurrency(amount * scale);
   const items: ReceiptItem[] = rawItems.map((r) => ({
     name: r.name,
     quantity: r.quantity,
     unit: r.unit,
-    unit_price: Math.round(r.unitPrice * scale),
-    total_price: Math.round(r.totalPrice * scale),
+    unit_price: roundReceiptAmount(r.unitPrice),
+    total_price: roundReceiptAmount(r.totalPrice),
     discount: 0,
     category: inferItemCategory(r.name),
     confidence: Math.min(99.2, Math.max(87, ocrConfidence + 5)),
@@ -500,13 +530,13 @@ export function parsePersianReceiptText(
   }));
 
   const computedSum = items.reduce((acc, it) => acc + it.total_price, 0);
-  const subtotal = rawSubtotal > 0 ? Math.round(rawSubtotal * scale) : computedSum;
-  const discountTotal = Math.round(rawDiscount * scale);
-  const taxTotal = Math.round(rawTax * scale);
+  const subtotal = rawSubtotal > 0 ? roundReceiptAmount(rawSubtotal) : computedSum;
+  const discountTotal = roundReceiptAmount(rawDiscount);
+  const taxTotal = roundReceiptAmount(rawTax);
   const totalAmount =
     rawTotal > 0
-      ? Math.round(rawTotal * scale)
-      : Math.max(0, subtotal - discountTotal + taxTotal);
+      ? roundReceiptAmount(rawTotal)
+      : roundForCurrency(Math.max(0, subtotal - discountTotal + taxTotal));
 
   const finalStore = storeName || 'فروشگاه اسکن‌شده';
 
@@ -519,7 +549,7 @@ export function parsePersianReceiptText(
     discount_total: discountTotal,
     tax_total: taxTotal,
     total_amount: totalAmount,
-    currency: 'تومان',
+    currency: explicitLira ? 'لیر' : 'تومان',
     detected_rial: explicitRial || implicitRial,
     ocr_confidence: Number(Math.min(99.2, Math.max(86, ocrConfidence + 5)).toFixed(1)),
     items,

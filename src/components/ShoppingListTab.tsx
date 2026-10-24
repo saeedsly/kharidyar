@@ -7,10 +7,12 @@ import {
   CheckCircle2,
   FolderPlus,
   Plus,
+  Pencil,
   RotateCcw,
   ShoppingBasket,
   Sparkles,
   Trash2,
+  X,
 } from 'lucide-react';
 import type { ShoppingItem, ShoppingList } from '../types';
 import { formatToman, inferItemCategory, toPersianDigits } from '../lib/persianMatcher';
@@ -28,6 +30,7 @@ interface ShoppingListTabProps {
     category: string;
   }) => Promise<void>;
   onToggleItem: (item: ShoppingItem) => Promise<void>;
+  onUpdateItem: (itemId: string, patch: Partial<ShoppingItem>) => Promise<void>;
   onDeleteItem: (itemId: string) => Promise<void>;
   onResetList: () => Promise<void>;
   onOpenScannerForList: (sampleId?: string) => void;
@@ -54,6 +57,7 @@ export function ShoppingListTab({
   onCreateList,
   onAddItem,
   onToggleItem,
+  onUpdateItem,
   onDeleteItem,
   onResetList,
   onOpenScannerForList,
@@ -64,6 +68,10 @@ export function ShoppingListTab({
   const [creatingList, setCreatingList] = useState(false);
   const [listTitle, setListTitle] = useState('');
   const [storeHint, setStoreHint] = useState('');
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [editingQuantity, setEditingQuantity] = useState(1);
+  const [editingUnit, setEditingUnit] = useState('عدد');
 
   const checkedCount = items.filter((i) => i.is_checked).length;
   const missingItems = items.filter((i) => !i.is_checked && i.reconcile_status === 'missing');
@@ -332,7 +340,9 @@ export function ShoppingListTab({
             <motion.div
               layout
               key={item.id}
-              onClick={() => onToggleItem(item)}
+              onClick={() => {
+                if (editingItemId !== item.id) void onToggleItem(item);
+              }}
               className={`flex items-center justify-between gap-3 rounded-2xl p-4 border transition cursor-pointer select-none ${
                 item.is_checked
                   ? 'bg-emerald-50/55 border-emerald-200/80'
@@ -341,58 +351,121 @@ export function ShoppingListTab({
                   : 'bg-white border-slate-200/70 hover:border-blue-200'
               }`}
             >
-              <div className="flex items-center gap-3.5 min-w-0">
-                <div
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 transition ${
-                    item.is_checked
-                      ? 'border-emerald-500 bg-emerald-500 text-white scale-105'
-                      : isMissing
-                      ? 'border-amber-500 bg-white'
-                      : 'border-slate-300 bg-white'
-                  }`}
+              {editingItemId === item.id ? (
+                <form
+                  className="flex min-w-0 flex-1 flex-col gap-2"
+                  onClick={(event) => event.stopPropagation()}
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    const cleanName = editingName.trim();
+                    if (!cleanName) return;
+                    await onUpdateItem(item.id, {
+                      name: cleanName,
+                      quantity: Math.max(0.5, Number(editingQuantity) || 1),
+                      unit: editingUnit,
+                      category: inferItemCategory(cleanName),
+                    });
+                    setEditingItemId(null);
+                  }}
                 >
-                  {item.is_checked && <Check className="h-4 w-4 stroke-[3]" />}
-                </div>
-
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      className={`text-sm font-bold ${
-                        item.is_checked ? 'line-through text-slate-500' : 'text-slate-900'
+                  <input
+                    autoFocus
+                    value={editingName}
+                    onChange={(event) => setEditingName(event.target.value)}
+                    aria-label="نام قلم خرید"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none focus:border-blue-500"
+                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      value={editingQuantity}
+                      onChange={(event) => setEditingQuantity(Number(event.target.value))}
+                      aria-label="تعداد"
+                      className="w-20 rounded-xl border border-slate-200 bg-white px-2 py-2 text-center text-xs font-bold tabular-fa"
+                    />
+                    <select
+                      value={editingUnit}
+                      onChange={(event) => setEditingUnit(event.target.value)}
+                      aria-label="واحد"
+                      className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-bold"
+                    >
+                      {UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                    </select>
+                    <button type="submit" className="rounded-xl bg-emerald-600 p-2 text-white" title="ذخیره ویرایش">
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => setEditingItemId(null)} className="rounded-xl bg-slate-100 p-2 text-slate-600" title="لغو">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <div className="flex min-w-0 items-center gap-3.5">
+                    <div
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 transition ${
+                        item.is_checked
+                          ? 'border-emerald-500 bg-emerald-500 text-white scale-105'
+                          : isMissing
+                          ? 'border-amber-500 bg-white'
+                          : 'border-slate-300 bg-white'
                       }`}
                     >
-                      {item.name}
-                    </span>
-                    <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 tabular-fa">
-                      {toPersianDigits(item.quantity)} {item.unit}
-                    </span>
-                    {isMissing && (
-                      <span className="rounded-lg bg-amber-200/80 px-2 py-0.5 text-[11px] font-bold text-amber-950">
-                        از قلم افتاده!
-                      </span>
-                    )}
+                      {item.is_checked && <Check className="h-4 w-4 stroke-[3]" />}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-sm font-bold ${item.is_checked ? 'line-through text-slate-500' : 'text-slate-900'}`}>
+                          {item.name}
+                        </span>
+                        <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 tabular-fa">
+                          {toPersianDigits(item.quantity)} {item.unit}
+                        </span>
+                        {isMissing && (
+                          <span className="rounded-lg bg-amber-200/80 px-2 py-0.5 text-[11px] font-bold text-amber-950">
+                            از قلم افتاده!
+                          </span>
+                        )}
+                      </div>
+                      {item.is_checked && item.matched_item_name && (
+                        <p className="mt-1 text-xs font-medium text-emerald-700 tabular-fa">
+                          ✓ تایید شده از فاکتور: {item.matched_item_name}
+                          {item.matched_price ? ` — ${formatToman(item.matched_price)}` : ''}
+                        </p>
+                      )}
+                    </div>
                   </div>
-
-                  {item.is_checked && item.matched_item_name && (
-                    <p className="mt-1 text-xs font-medium text-emerald-700 tabular-fa">
-                      ✓ تایید شده از فاکتور: {item.matched_item_name}
-                      {item.matched_price ? ` — ${formatToman(item.matched_price)}` : ''}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteItem(item.id);
-                }}
-                className="p-2 rounded-xl text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition cursor-pointer"
-                title="حذف قلم"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setEditingItemId(item.id);
+                        setEditingName(item.name);
+                        setEditingQuantity(item.quantity);
+                        setEditingUnit(item.unit || 'عدد');
+                      }}
+                      className="rounded-xl p-2 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
+                      title="ویرایش قلم"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onDeleteItem(item.id);
+                      }}
+                      className="rounded-xl p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                      title="حذف قلم"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           );
         })}
