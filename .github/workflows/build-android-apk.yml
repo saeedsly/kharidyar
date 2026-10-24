@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-and-publish-all:
-    name: Publish Web App & Build Stable-Signed Android Release
+    name: Build Android 7 Compatible APK & Publish Global Web CDN
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -88,10 +88,7 @@ jobs:
           print(f"Uploaded {uploaded} production web files to the public CDN.")
           PY
 
-      # APKs must keep one signing certificate between releases. The previous pipeline generated a
-      # different key on each run, which breaks Android updates. Until a persistent key is stored in
-      # GitHub Actions Secrets, publish the web update but do not overwrite the installable APK.
-      - name: Restore persistent Android release keystore
+      - name: Restore persistent Android release keystore if available
         id: restore-signing
         env:
           KEYSTORE_BASE64: ${{ secrets.KHARIDYAR_RELEASE_KEYSTORE_BASE64 }}
@@ -100,7 +97,7 @@ jobs:
         run: |
           if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Persistent Android signing secrets are not configured; keeping the existing APK release unchanged."
+            echo "No persistent signing secret is configured; this is a one-time signed installer." 
             exit 0
           fi
           KEYSTORE_PATH="$RUNNER_TEMP/kharidyar-release.p12"
@@ -111,19 +108,42 @@ jobs:
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Build aligned Android 7 Legacy APK, Modern APK & Play Store AAB
-        if: steps.restore-signing.outputs.ready == 'true'
         working-directory: android
         env:
-          KEYSTORE_PATH: ${{ steps.restore-signing.outputs.keystore_path }}
-          STORE_PASSWORD: ${{ secrets.KHARIDYAR_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KHARIDYAR_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KHARIDYAR_KEY_PASSWORD }}
+          PERSISTENT_KEY: ${{ steps.restore-signing.outputs.ready }}
+          PERSISTENT_KEYSTORE_PATH: ${{ steps.restore-signing.outputs.keystore_path }}
+          PERSISTENT_STORE_PASSWORD: ${{ secrets.KHARIDYAR_STORE_PASSWORD }}
+          PERSISTENT_KEY_ALIAS: ${{ secrets.KHARIDYAR_KEY_ALIAS }}
+          PERSISTENT_KEY_PASSWORD: ${{ secrets.KHARIDYAR_KEY_PASSWORD }}
         run: |
-          test -n "$KEY_PASSWORD"
           chmod +x gradlew
+          if [ "$PERSISTENT_KEY" = "true" ]; then
+            KEYSTORE_PATH="$PERSISTENT_KEYSTORE_PATH"
+            STORE_TYPE="PKCS12"
+            STORE_PASSWORD="$PERSISTENT_STORE_PASSWORD"
+            KEY_ALIAS="$PERSISTENT_KEY_ALIAS"
+            KEY_PASSWORD="$PERSISTENT_KEY_PASSWORD"
+          else
+            # Temporary one-time key only for this install. It is never uploaded or committed.
+            KEYSTORE_PATH="$RUNNER_TEMP/kharidyar-one-time.jks"
+            STORE_TYPE="JKS"
+            STORE_PASSWORD="KharidYarOneTimeInstall2026"
+            KEY_ALIAS="kharidyar_release"
+            KEY_PASSWORD="$STORE_PASSWORD"
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -alias "$KEY_ALIAS" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "$STORE_PASSWORD" \
+              -keypass "$KEY_PASSWORD" \
+              -dname "CN=Saeed Salari, OU=KharidYar Product Engineering, O=Saeed Salari, L=Madrid, ST=Madrid, C=ES"
+          fi
+
           ./gradlew assembleRelease bundleRelease --no-daemon \
             -PKHARIDYAR_STORE_FILE="$KEYSTORE_PATH" \
-            -PKHARIDYAR_STORE_TYPE=PKCS12 \
+            -PKHARIDYAR_STORE_TYPE="$STORE_TYPE" \
             -PKHARIDYAR_STORE_PASSWORD="$STORE_PASSWORD" \
             -PKHARIDYAR_KEY_ALIAS="$KEY_ALIAS" \
             -PKHARIDYAR_KEY_PASSWORD="$KEY_PASSWORD"
@@ -135,7 +155,7 @@ jobs:
 
           "$APKSIGNER_BIN" sign \
             --ks "$KEYSTORE_PATH" \
-            --ks-type PKCS12 \
+            --ks-type "$STORE_TYPE" \
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$STORE_PASSWORD" \
             --key-pass "pass:$KEY_PASSWORD" \
@@ -147,7 +167,7 @@ jobs:
 
           "$APKSIGNER_BIN" sign \
             --ks "$KEYSTORE_PATH" \
-            --ks-type PKCS12 \
+            --ks-type "$STORE_TYPE" \
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$STORE_PASSWORD" \
             --key-pass "pass:$KEY_PASSWORD" \
@@ -162,7 +182,6 @@ jobs:
           "$APKSIGNER_BIN" verify -v --min-sdk-version 24 --max-sdk-version 35 --print-certs ../KharidYar-Universal-v1.4.2.apk
 
       - name: Publish Android APKs to Public HTTPS CDN
-        if: steps.restore-signing.outputs.ready == 'true'
         env:
           SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImduZ3Jna3J5cHZyZ2Nua2xkYmh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTkyNzEsImV4cCI6MjEwODI3NTI3MX0.uHp5_u0ASWy5P0BVjppDC1h4MdXJ-0KgqJl_JkwSMQI"
         run: |
@@ -194,7 +213,6 @@ jobs:
           PY
 
       - name: Upload Signed Release Artifacts
-        if: steps.restore-signing.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: KharidYar-Android-Release-v1.4.2
@@ -205,23 +223,19 @@ jobs:
           if-no-files-found: error
 
       - name: Publish Signed Packages to Public Release (v1.4.2)
-        if: steps.restore-signing.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view v1.4.2 >/dev/null 2>&1 || gh release create v1.4.2 \
-            --title "خریدیـار 1.4.2 — پردازش فاکتور سریع‌تر روی اندرویدهای قدیمی" \
-            --notes "پردازش تصویر کم‌حافظه و APK با امضای پایدار. صاحب اثر: سعید سالاری."
+            --title "خریدیـار 1.4.2 — پردازش سریع‌تر روی اندرویدهای قدیمی" \
+            --notes "APK کم‌حجم، اسکن فاکتور بهینه‌شده برای اندرویدهای قدیمی و امضای پایدار (در صورت تنظیم کلید مخزن). صاحب اثر: سعید سالاری."
           gh release upload v1.4.2 \
             KharidYar-Android7-v1.4.2.apk \
             KharidYar-Universal-v1.4.2.apk \
             KharidYar-PlayStore-v1.4.2.aab --clobber
 
-      - name: Verify Public Web App URL
-        run: |
-          curl -fsSI "https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/app.js" | head -n 5
-
-      - name: Verify Android APK CDN URL
-        if: steps.restore-signing.outputs.ready == 'true'
+      - name: Verify Public Download URLs
         run: |
           curl -fsSI "https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/downloads/KharidYar-Android7-v1.4.2.apk" | head -n 5
+          curl -fsSI "https://github.com/saeedsly/kharidyar/releases/download/v1.4.2/KharidYar-Android7-v1.4.2.apk" | head -n 5
+          curl -fsSI "https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/app.js" | head -n 5

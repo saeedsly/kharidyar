@@ -68,9 +68,9 @@ app.get('/api/health', (_req, res) => {
     apkSizeMb,
     apkDownloadUrl: apkFile
       ? '/api/download/apk'
-      : 'https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/downloads/KharidYar-Android7-v1.4.1.apk',
+      : 'https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/downloads/KharidYar-Android7.apk',
     githubReleaseApkUrl:
-      'https://github.com/saeedsly/kharidyar/releases/download/v1.4.1/KharidYar-Android7-v1.4.1.apk',
+      'https://github.com/saeedsly/kharidyar/releases/download/v1.4.2/KharidYar-Android7-v1.4.2.apk',
     timestamp: new Date().toISOString(),
   });
 });

@@ -46,7 +46,7 @@ import { AboutOwnerModal, OWNER_LINKEDIN_URL } from './components/AboutOwnerModa
 type TabKey = 'dashboard' | 'list' | 'receipts' | 'connect';
 
 const GITHUB_RELEASE_APK_URL =
-  'https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/downloads/KharidYar-Android7-v1.4.1.apk';
+  'https://gngrgkrypvrgcnkldbhx.supabase.co/storage/v1/object/public/web-cdn/downloads/KharidYar-Android7.apk';
 
 export default function App() {
   const isNative = Capacitor.isNativePlatform();
