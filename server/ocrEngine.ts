@@ -15,7 +15,7 @@ import {
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
-const TESSDATA_DIR = path.join(ROOT_DIR, 'public', 'tessdata');
+const TESSDATA_DIR = path.join(ROOT_DIR, 'server', 'tessdata');
 const CV_SCRIPT = path.join(__dirname, 'cv_pipeline.py');
 
 let fasWorkerPromise: Promise<Worker> | null = null;

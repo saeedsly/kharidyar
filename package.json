@@ -7,10 +7,10 @@
   "scripts": {
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "dev:client": "vite --host 0.0.0.0 --port 5173",
-    "dev:server": "tsx server/index.ts",
+    "dev:server": "node scripts/prepare-assets.mjs && tsx server/index.ts",
     "build": "node scripts/prepare-assets.mjs && vite build",
     "cap:sync": "npm run build && npx cap sync android",
-    "start": "bash -c 'python3 -c \"import cv2, PIL\" 2>/dev/null || pip install --break-system-packages --quiet pillow opencv-python-headless numpy; [ -d node_modules ] || npm install --no-audit --no-fund; [ -f dist/index.html ] || npm run build; exec npx tsx server/index.ts'"
+    "start": "bash -c 'python3 -c \"import cv2, PIL\" 2>/dev/null || pip install --break-system-packages --quiet pillow opencv-python-headless numpy; [ -d node_modules ] || npm install --no-audit --no-fund; node scripts/prepare-assets.mjs; [ -f dist/index.html ] || npm run build; exec npx tsx server/index.ts'"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

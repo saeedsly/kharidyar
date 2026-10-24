@@ -4,6 +4,7 @@ build/
 .venv/
 uploads/
 public/tessdata/
+server/tessdata/
 server/data/*.sqlite*
 *.log
 .DS_Store
