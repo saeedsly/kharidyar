@@ -638,7 +638,8 @@ export async function scanReceiptHybrid(params: {
       );
       const endpoint = `${serverUrl.replace(/\/$/, '')}/api/scan`;
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 18000);
+      const serverTimeoutMs = isLowPowerAndroid() ? 8000 : 18000;
+      const timer = setTimeout(() => ctrl.abort(), serverTimeoutMs);
 
       let resp: Response;
       if (sampleId) {
