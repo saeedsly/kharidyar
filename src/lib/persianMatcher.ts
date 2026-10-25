@@ -281,7 +281,7 @@ const IGNORE_HEADER_KEYWORDS =
 
 const COLLAPSED_ITEM_MARKER = /(?:^|\s)\d{1,3}\s*[-–.)]\s*(?=[\u0600-\u06FF])/g;
 const COLLAPSED_FOOTER_MARKER =
-  /(?:^|\s)(?:جمع\s*(?:اقلام|کل(?:\s*اقلام)?|فاکتور)|مبلغ\s*(?:قابل\s*پرداخت|نهایی|کل)|قابل\s*پرداخت|تخفیف|مالیات|ارزش\s*افزوده|sub\s*total|subtotal|grand\s*total|total\s*paid|amount\s*due|discount|tax|vat)(?=\s|[:：]|$)/gi;
+  /(?:^|\s)(?:جمع\s*(?:اقلام|کل(?:\s*اقلام)?|فاکتور)|(?:[A-Za-z]{1,12}\s*)?اقلام|مبلغ\s*(?:قابل\s*پرداخت|نهایی|کل)|قابل\s*پرداخت|تخفیف|مالیات|ارزش\s*افزوده|sub\s*total|subtotal|grand\s*total|total\s*paid|amount\s*due|discount|tax|vat)(?=\s|[:：(]|$)/gi;
 const COLLAPSED_HEADER_MARKER =
   /(?:^|\s)(?:صندوق\s*شماره|تاریخ|شماره\s*(?:فاکتور|فیش)|نام(?:\s*کالا)?|شرح\s*کالا|تعداد|قیمت\s*واحد|مبلغ\s*کل)(?=\s|[:：]|$)/gi;
 const COLLAPSED_COLUMN_HEADER_MARKER =
@@ -487,8 +487,11 @@ export function parsePersianReceiptText(
       continue;
     }
 
-    // Summary labels commonly printed on Persian, English and Turkish thermal receipts.
-    if (/^(جمع اقلام|جمع فاکتور|جمع کل اقلام|sub\s*total|subtotal|ara toplam)/i.test(line) && linePrices.length) {
+    // OCR can misread "جمع" while still recognizing the distinctive subtotal label "اقلام".
+    const isSubtotalLine =
+      /(?:^|\s)(?:(?:جمع|[A-Za-z]{1,12})\s*)?اقلام(?:\s|[:：]|$)/i.test(line) ||
+      /^(جمع فاکتور|جمع کل اقلام|sub\s*total|subtotal|ara toplam)/i.test(line);
+    if (isSubtotalLine && linePrices.length) {
       rawSubtotal = linePrices[linePrices.length - 1];
       pendingProductTitle = null;
       continue;
