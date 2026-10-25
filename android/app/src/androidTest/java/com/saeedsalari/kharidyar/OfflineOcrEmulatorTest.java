@@ -149,7 +149,7 @@ public class OfflineOcrEmulatorTest {
                     ));
                     String parsedItemTotals = evaluate(scenario,
                         "JSON.stringify(Array.from(document.querySelectorAll('[data-testid=\"receipt-item-total\"]')) " +
-                        ".map(element => element.getAttribute('data-amount')))"
+                        ".map(element => Number(element.getAttribute('data-amount'))))"
                     );
                     String parsedSubtotal = evaluate(scenario,
                         "document.querySelector('[data-testid=\"receipt-subtotal\"]')?.getAttribute('data-amount') || ''"
