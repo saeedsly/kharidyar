@@ -235,9 +235,13 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         return new RecognitionPass(api.getUTF8Text(), api.meanConfidence(), extractTextLines(api));
     }
 
-    private boolean shouldRetryRecognition(RecognitionPass result, Bitmap bitmap) {
-        int minimumCharacters = Math.max(80, Math.min(200, bitmap.getHeight() / 10));
-        return result.confidence < 75 || result.lines.length() < 10 || result.text.trim().length() < minimumCharacters;
+    private boolean shouldRetryRecognition(RecognitionPass result, Bitmap bitmap, boolean portraitReceipt) {
+        int textLength = result.text.trim().length();
+        if (portraitReceipt) {
+            int minimumCharacters = Math.max(80, Math.min(200, bitmap.getHeight() / 10));
+            return result.confidence < 75 || result.lines.length() < 10 || textLength < minimumCharacters;
+        }
+        return result.confidence < 60 || result.lines.length() < 5 || textLength < 80;
     }
 
     private void performRecognition(PluginCall call, String imageBase64, String language, int expectedWidth, int expectedHeight) {
@@ -267,7 +271,7 @@ public class OfflineOcrAssetsPlugin extends Plugin {
             // A long receipt is usually one text column. If the first layout is sparse or weak,
             // retry once with the alternate segmentation mode and keep the stronger result.
             RecognitionPass bestPass = recognizeWithPageSegMode(api, bitmap, primaryMode);
-            if (shouldRetryRecognition(bestPass, bitmap)) {
+            if (shouldRetryRecognition(bestPass, bitmap, portraitReceipt)) {
                 sendProgress("در حال بررسی دوبارهٔ متن فاکتور...", 0);
                 RecognitionPass alternatePass = recognizeWithPageSegMode(api, bitmap, alternateMode);
                 if (alternatePass.score() > bestPass.score()) bestPass = alternatePass;
@@ -308,9 +312,6 @@ public class OfflineOcrAssetsPlugin extends Plugin {
             if (!created.init(dataPath, language, TessBaseAPI.OEM_LSTM_ONLY)) {
                 created.recycle();
                 throw new IllegalStateException("Tesseract could not initialize language " + language + ".");
-            }
-            if (!created.setVariable("user_defined_dpi", "300")) {
-                Log.w(TAG, "Tesseract did not accept the receipt DPI hint");
             }
             if (!created.setVariable("preserve_interword_spaces", "1")) {
                 Log.w(TAG, "Tesseract did not enable preserved spaces");
