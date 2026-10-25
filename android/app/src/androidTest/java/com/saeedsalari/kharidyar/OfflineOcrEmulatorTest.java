@@ -176,7 +176,8 @@ public class OfflineOcrEmulatorTest {
                     assertTrue("OCR did not preserve the sample payable amount.", rawOcrText.contains("420,000"));
                     assertEquals("The item prices were parsed incorrectly. OCR: " + rawOcrText,
                         "[98000,65000,115000,42000,78000,45000]", parsedItemTotals);
-                    assertEquals("The subtotal was parsed incorrectly. OCR: " + rawOcrText,
+                    assertEquals("The subtotal was parsed incorrectly. OCR: " + rawOcrText +
+                        " Parsed item totals: " + parsedItemTotals + " Review state: " + reviewDetails,
                         "443000", parsedSubtotal);
                     assertEquals("The discount was parsed incorrectly. OCR: " + rawOcrText +
                         " Parsed subtotal: " + parsedSubtotal + " item totals: " + parsedItemTotals +
