@@ -1,9 +1,6 @@
 package com.saeedsalari.kharidyar;
 
-import android.app.Activity;
 import android.app.Instrumentation;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.os.SystemClock;
 import android.webkit.ConsoleMessage;
 import android.webkit.WebChromeClient;
@@ -184,45 +181,46 @@ public class OfflineOcrEmulatorTest {
 
     private static void verifySystemFilePicker(ActivityScenario<MainActivity> scenario) throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
-        Instrumentation.ActivityMonitor pickerMonitor = new Instrumentation.ActivityMonitor(
-            new IntentFilter(Intent.ACTION_OPEN_DOCUMENT),
-            null,
-            false
+        UiDevice device = UiDevice.getInstance(instrumentation);
+        String openScanner = evaluate(scenario,
+            "(() => { const button = document.querySelector('button[aria-label=\"اسکن فاکتور\"]'); " +
+            "if (!button) return 'scanner-button-not-found'; button.click(); return 'scanner-opened'; })()"
         );
-        instrumentation.addMonitor(pickerMonitor);
-        Activity pickerActivity = null;
-        boolean pickerWasRequested = false;
-        try {
-            String openScanner = evaluate(scenario,
-                "(() => { const button = document.querySelector('button[aria-label=\"اسکن فاکتور\"]'); " +
-                "if (!button) return 'scanner-button-not-found'; button.click(); return 'scanner-opened'; })()"
-            );
-            assertEquals("The scanner could not be opened for file-picker testing.", "scanner-opened", openScanner);
+        assertEquals("The scanner could not be opened for file-picker testing.", "scanner-opened", openScanner);
 
-            long pickerButtonDeadline = SystemClock.elapsedRealtime() + 10_000;
-            String pickerClick = "picker-button-not-found";
-            while (SystemClock.elapsedRealtime() < pickerButtonDeadline && !"picker-started".equals(pickerClick)) {
-                pickerClick = evaluate(scenario,
-                    "(() => { const button = Array.from(document.querySelectorAll('button')) " +
-                    ".find(element => (element.innerText || '').includes('انتخاب فایل یا عکس')); " +
-                    "if (!button) return 'picker-button-not-found'; button.click(); return 'picker-started'; })()"
-                );
-                if (!"picker-started".equals(pickerClick)) SystemClock.sleep(250);
-            }
-            assertEquals("The file picker button was not available.", "picker-started", pickerClick);
-            pickerWasRequested = true;
-            pickerActivity = instrumentation.waitForMonitorWithTimeout(pickerMonitor, 10_000);
-            assertTrue("Android did not open the system document picker.", pickerActivity != null);
-            String pickerPackage = pickerActivity.getPackageName().toLowerCase();
-            assertTrue("Expected Android DocumentsUI, but the picker opened " + pickerPackage,
-                pickerPackage.contains("documentsui"));
-            System.out.println("OFFLINE_OCR_FILE_PICKER_PASS: ACTION_OPEN_DOCUMENT opened " + pickerPackage + ".");
-        } finally {
-            if (pickerWasRequested || pickerActivity != null) {
-                UiDevice.getInstance(instrumentation).pressBack();
-            }
-            instrumentation.removeMonitor(pickerMonitor);
+        long pickerButtonDeadline = SystemClock.elapsedRealtime() + 10_000;
+        String pickerClick = "picker-button-not-found";
+        while (SystemClock.elapsedRealtime() < pickerButtonDeadline && !"picker-started".equals(pickerClick)) {
+            pickerClick = evaluate(scenario,
+                "(() => { const button = Array.from(document.querySelectorAll('button')) " +
+                ".find(element => (element.innerText || '').includes('انتخاب فایل یا عکس')); " +
+                "if (!button) return 'picker-button-not-found'; button.click(); return 'picker-started'; })()"
+            );
+            if (!"picker-started".equals(pickerClick)) SystemClock.sleep(250);
         }
+        assertEquals("The file picker button was not available.", "picker-started", pickerClick);
+
+        long pickerDeadline = SystemClock.elapsedRealtime() + 10_000;
+        String pickerPackage = "";
+        while (SystemClock.elapsedRealtime() < pickerDeadline) {
+            pickerPackage = device.getCurrentPackageName();
+            if (pickerPackage != null && pickerPackage.toLowerCase().contains("documentsui")) break;
+            SystemClock.sleep(250);
+        }
+        if (pickerPackage == null) pickerPackage = "<unknown>";
+        if (!pickerPackage.toLowerCase().contains("documentsui")) {
+            String appState = "<WebView unavailable>";
+            try {
+                appState = evaluate(scenario, "document.body ? document.body.innerText : ''") +
+                    " Errors: " + getPageErrors(scenario);
+            } catch (Exception ignored) {
+                // The diagnostic is optional if the external picker interrupted the WebView.
+            }
+            assertTrue("ACTION_OPEN_DOCUMENT did not open Android DocumentsUI. Current package: " +
+                pickerPackage + ". App state: " + appState, pickerPackage.toLowerCase().contains("documentsui"));
+        }
+        System.out.println("OFFLINE_OCR_FILE_PICKER_PASS: ACTION_OPEN_DOCUMENT opened " + pickerPackage + ".");
+        device.pressBack();
 
         long appReturnDeadline = SystemClock.elapsedRealtime() + 10_000;
         String body = "";
