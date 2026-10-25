@@ -91,7 +91,8 @@ public class OfflineOcrEmulatorTest {
             while (SystemClock.elapsedRealtime() < ocrDeadline) {
                 lastBody = evaluate(scenario, "document.body ? document.body.innerText : ''");
                 String progressSnapshot = evaluate(scenario,
-                    "(() => { const modal = document.querySelector('.fixed.inset-0'); if (!modal) return ''; " +
+                    "(() => { const modal = Array.from(document.querySelectorAll('.fixed.inset-0')) " +
+                    ".find(node => (node.textContent || '').includes('اسکنر هوشمند فاکتور')); if (!modal) return ''; " +
                     "const percent = Array.from(modal.querySelectorAll('span')).map(node => node.textContent || '') " +
                     ".find(text => text.includes('٪')) || ''; " +
                     "const stage = Array.from(modal.querySelectorAll('p')).map(node => (node.textContent || '').trim()) " +
