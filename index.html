@@ -27,6 +27,17 @@
     <link rel="icon" type="image/png" href="./icon-192.png" />
     <link rel="apple-touch-icon" href="./icon-192.png" />
     <title>خریدیـار | اسکن هوشمند فاکتور و همراه خرید — سعید سالاری</title>
+    <script>
+      // queueMicrotask is missing from Android 7's Chrome 69 WebView. Some UI
+      // dependencies use it before React mounts, so provide the standard fallback early.
+      if (typeof window.queueMicrotask !== 'function') {
+        window.queueMicrotask = (callback) => {
+          Promise.resolve().then(callback).catch((error) => {
+            setTimeout(() => { throw error; });
+          });
+        };
+      }
+    </script>
   </head>
   <body class="bg-[#F2F5F9] text-slate-900 antialiased selection:bg-blue-600/15 selection:text-blue-700">
     <div id="root"></div>
