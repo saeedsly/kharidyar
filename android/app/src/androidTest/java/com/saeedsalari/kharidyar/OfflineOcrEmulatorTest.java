@@ -136,7 +136,7 @@ public class OfflineOcrEmulatorTest {
                 }
                 SystemClock.sleep(750);
             }
-            fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR did not reach review within the configured app timeout. Last progress: "} + lastOcrProgress + " Last UI: " + lastBody + " Errors: " + getPageErrors(scenario) + " Console: " + browserConsole.get());
+            fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR did not reach review within the configured app timeout. Last progress: " + lastOcrProgress + " Last UI: " + lastBody + " Errors: " + getPageErrors(scenario) + " Console: " + browserConsole.get());
         }
     }
 
