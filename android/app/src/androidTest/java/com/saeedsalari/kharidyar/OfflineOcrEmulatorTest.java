@@ -90,12 +90,14 @@ public class OfflineOcrEmulatorTest {
             String lastOcrProgress = "<no progress reported>";
             while (SystemClock.elapsedRealtime() < ocrDeadline) {
                 lastBody = evaluate(scenario, "document.body ? document.body.innerText : ''");
-                int percentIndex = lastBody.indexOf('٪');
-                if (percentIndex >= 0) {
-                    int contextStart = Math.max(0, percentIndex - 120);
-                    int contextEnd = Math.min(lastBody.length(), percentIndex + 12);
-                    lastOcrProgress = lastBody.substring(contextStart, contextEnd);
-                }
+                String progressSnapshot = evaluate(scenario,
+                    "(() => { const modal = document.querySelector('.fixed.inset-0'); if (!modal) return ''; " +
+                    "const percent = Array.from(modal.querySelectorAll('span')).map(node => node.textContent || '') " +
+                    ".find(text => text.includes('٪')) || ''; " +
+                    "const stage = Array.from(modal.querySelectorAll('p')).map(node => (node.textContent || '').trim()) " +
+                    ".filter(Boolean).join(' | '); return JSON.stringify({percent, stage}); })()"
+                );
+                if (!progressSnapshot.isEmpty()) lastOcrProgress = progressSnapshot;
                 if (lastBody.contains("دقت خوانش:")) {
                     evaluate(scenario,
                         "(() => { const button = Array.from(document.querySelectorAll('button')) " +
