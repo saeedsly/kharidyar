@@ -30,11 +30,17 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Inspect Android SDK tools
+      - name: Set up Android SDK tools and emulator
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools emulator'
+
+      - name: Verify Android SDK
         run: |
-          echo "::notice title=Android SDK::ANDROID_HOME=$ANDROID_HOME"
+          echo "Using Android SDK at $ANDROID_HOME"
           test -d "$ANDROID_HOME/platforms/android-35"
-          echo "::notice title=SDK tools::sdkmanager=$(command -v sdkmanager || true); emulator=$([ -x \"$ANDROID_HOME/emulator/emulator\" ] && echo present || echo missing)"
+          command -v sdkmanager
+          test -x "$ANDROID_HOME/emulator/emulator"
 
       - name: Build local OCR assets
         run: |
