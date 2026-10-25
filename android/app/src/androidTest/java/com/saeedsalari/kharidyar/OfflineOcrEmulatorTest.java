@@ -97,7 +97,7 @@ public class OfflineOcrEmulatorTest {
                     "const stage = Array.from(modal.querySelectorAll('p')).map(node => (node.textContent || '').trim()) " +
                     ".filter(Boolean).join(' | '); return JSON.stringify({percent, stage}); })()"
                 );
-                if (!progressSnapshot.isEmpty()) lastOcrProgress = progressSnapshot;
+                if (progressSnapshot.contains("٪")) lastOcrProgress = progressSnapshot;
                 if (lastBody.contains("دقت خوانش:")) {
                     evaluate(scenario,
                         "(() => { const button = Array.from(document.querySelectorAll('button')) " +
