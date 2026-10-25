@@ -35,9 +35,6 @@ public class OfflineOcrEmulatorTest {
                         return true;
                     }
                 });
-                // Capture startup JavaScript/module errors as well; ActivityScenario launches before
-                // the test can attach its console listener, so reload once with diagnostics enabled.
-                webView.reload();
             });
 
             long readyDeadline = SystemClock.elapsedRealtime() + APP_READY_TIMEOUT_MS;
@@ -46,6 +43,17 @@ public class OfflineOcrEmulatorTest {
                 body = evaluate(scenario, "document.body ? document.body.innerText : ''");
                 if (body.contains("تست زنده اسکنر هوشمند")) break;
                 SystemClock.sleep(500);
+            }
+            if (!body.contains("تست زنده اسکنر هوشمند")) {
+                // If startup failed before diagnostics were attached, reload only on failure so
+                // the browser console captures the actual JavaScript compatibility error.
+                scenario.onActivity(activity -> activity.getBridge().getWebView().reload());
+                SystemClock.sleep(2_000);
+                try {
+                    body = evaluate(scenario, "document.body ? document.body.innerText : ''");
+                } catch (AssertionError error) {
+                    throw new AssertionError("WebView did not respond after diagnostic reload. Console: " + browserConsole.get(), error);
+                }
             }
             String pageState = evaluate(scenario,
                 "JSON.stringify({href: location.href, readyState: document.readyState, title: document.title, " +
