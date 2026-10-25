@@ -91,7 +91,7 @@ public class OfflineOcrEmulatorTest {
             while (SystemClock.elapsedRealtime() < ocrDeadline) {
                 lastBody = evaluate(scenario, "document.body ? document.body.innerText : ''");
                 String progressSnapshot = evaluate(scenario,
-                    "JSON.stringify({progress: window.__emulatorOcrProgress || null, worker: window.__emulatorOcrWorkerStatus || null})"
+                    "JSON.stringify({progress: window.__emulatorOcrProgress || null, worker: window.__emulatorOcrWorkerStatus || null, core: window.__emulatorOcrCorePath || null, userAgent: navigator.userAgent})"
                 );
                 if (!"{\"progress\":null,\"worker\":null}".equals(progressSnapshot)) lastOcrProgress = progressSnapshot;
                 if (lastBody.contains("دقت خوانش:")) {

@@ -10,7 +10,9 @@ fs.rmSync(targetDir, { recursive: true, force: true });
 fs.mkdirSync(targetDir, { recursive: true });
 
 const coreDir = path.join(rootDir, 'node_modules/tesseract.js-core');
+const asmCoreDir = path.join(rootDir, 'node_modules/tesseract.js-core-asm');
 const assets = [
+  [path.join(asmCoreDir, 'tesseract-core.asm.js'), 'tesseract-core-asm.js'],
   [
     path.join(rootDir, 'node_modules/@tesseract.js-data/fas/4.0.0_best_int/fas.traineddata.gz'),
     'fas.traineddata.gz',
@@ -47,6 +49,12 @@ for (const [source, name] of assets) {
     // Chrome 69 (Android 7's WebView) cannot parse. They are copied outside
     // Vite's module graph, so transpile every standalone JS worker/core here.
     let sourceCode = fs.readFileSync(source, 'utf8');
+    if (name === 'tesseract-core-asm.js') {
+      // Core 3.0.2 still ships a pure asm.js build for WebViews where the
+      // asynchronous WebAssembly compiler stalls. Tesseract's worker looks for
+      // the WASM export name, so expose this compatible factory under that name.
+      sourceCode += '\nself.TesseractCoreWASM = self.TesseractCoreASM;\n';
+    }
     if (name === 'worker.min.js') {
       // Surface whether the Android WebView's WebAssembly compiler actually
       // resolves; Tesseract otherwise reports no progress while Core() awaits it.

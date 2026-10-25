@@ -31,6 +31,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tesseract.js": "^5.1.1",
+    "tesseract.js-core-asm": "npm:tesseract.js-core@3.0.2",
     "vazirmatn": "^33.0.3"
   },
   "devDependencies": {

@@ -23,14 +23,38 @@ const WASM_SIMD_PROBE = new Uint8Array([
 ]);
 
 function getOcrCorePath(): string {
-  let simdSupported = false;
-  try {
-    simdSupported = typeof WebAssembly !== 'undefined' && WebAssembly.validate(WASM_SIMD_PROBE);
-  } catch {
-    // Older WebViews can throw for unsupported wasm features; use the baseline core.
+  const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+  const androidVersion = /Android\s+(\d+)/i.exec(userAgent)?.[1];
+  const chromeVersion = /Chrome\/(\d+)/i.exec(userAgent)?.[1];
+  const legacyAndroidWebView = Boolean(
+    androidVersion && (
+      Number(androidVersion) <= 7 ||
+      (chromeVersion && Number(chromeVersion) < 75)
+    )
+  );
+
+  let coreFile: string;
+  if (legacyAndroidWebView) {
+    coreFile = 'tesseract-core-asm.js';
+  } else {
+    let simdSupported = false;
+    try {
+      simdSupported = typeof WebAssembly !== 'undefined' && WebAssembly.validate(WASM_SIMD_PROBE);
+    } catch {
+      // Older WebViews can throw for unsupported wasm features; use the baseline core.
+    }
+    coreFile = simdSupported ? 'tesseract-core-simd-lstm.wasm.js' : 'tesseract-core-lstm.wasm.js';
   }
-  const coreFile = simdSupported ? 'tesseract-core-simd-lstm.wasm.js' : 'tesseract-core-lstm.wasm.js';
-  return assetUrl(`tessdata/${coreFile}`);
+
+  const corePath = assetUrl(`tessdata/${coreFile}`);
+  if (typeof window !== 'undefined') {
+    const debugWindow = window as Window & {
+      __emulatorOcrDebug?: boolean;
+      __emulatorOcrCorePath?: string;
+    };
+    if (debugWindow.__emulatorOcrDebug) debugWindow.__emulatorOcrCorePath = corePath;
+  }
+  return corePath;
 }
 
 type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
