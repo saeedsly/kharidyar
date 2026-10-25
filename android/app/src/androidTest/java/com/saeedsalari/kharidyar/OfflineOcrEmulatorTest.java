@@ -72,7 +72,7 @@ public class OfflineOcrEmulatorTest {
             );
 
             evaluate(scenario,
-                "(() => { window.__emulatorOcrErrors = []; window.__emulatorOcrDebug = true; window.__emulatorOcrProgress = null; " +
+                "(() => { window.__emulatorOcrErrors = []; window.__emulatorOcrDebug = true; window.__emulatorOcrProgress = null; window.__emulatorOcrWorkerStatus = null; " +
                 "window.addEventListener('error', e => window.__emulatorOcrErrors.push(String(e.message || e.error || 'window error'))); " +
                 "window.addEventListener('unhandledrejection', e => window.__emulatorOcrErrors.push(String(e.reason || 'unhandled rejection'))); " +
                 "return 'armed'; })()"
@@ -91,9 +91,9 @@ public class OfflineOcrEmulatorTest {
             while (SystemClock.elapsedRealtime() < ocrDeadline) {
                 lastBody = evaluate(scenario, "document.body ? document.body.innerText : ''");
                 String progressSnapshot = evaluate(scenario,
-                    "JSON.stringify(window.__emulatorOcrProgress || {})"
+                    "JSON.stringify({progress: window.__emulatorOcrProgress || null, worker: window.__emulatorOcrWorkerStatus || null})"
                 );
-                if (!"{}".equals(progressSnapshot)) lastOcrProgress = progressSnapshot;
+                if (!"{\"progress\":null,\"worker\":null}".equals(progressSnapshot)) lastOcrProgress = progressSnapshot;
                 if (lastBody.contains("دقت خوانش:")) {
                     evaluate(scenario,
                         "(() => { const button = Array.from(document.querySelectorAll('button')) " +

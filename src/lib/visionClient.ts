@@ -31,6 +31,7 @@ function progress(stage: string, percent: number) {
     const debugWindow = window as Window & {
       __emulatorOcrDebug?: boolean;
       __emulatorOcrProgress?: { stage: string; percent: number };
+      __emulatorOcrWorkerStatus?: { status: string; progress?: number };
     };
     if (debugWindow.__emulatorOcrDebug) {
       debugWindow.__emulatorOcrProgress = { stage, percent: normalizedPercent };
@@ -109,6 +110,18 @@ async function getOcrWorker(
       cacheMethod: 'write',
       logging: typeof window !== 'undefined' && Boolean((window as any).__emulatorOcrDebug),
       logger: (message: { status: string; progress?: number }) => {
+        if (typeof window !== 'undefined') {
+          const debugWindow = window as Window & {
+            __emulatorOcrDebug?: boolean;
+            __emulatorOcrWorkerStatus?: { status: string; progress?: number };
+          };
+          if (debugWindow.__emulatorOcrDebug) {
+            debugWindow.__emulatorOcrWorkerStatus = {
+              status: message.status,
+              progress: message.progress,
+            };
+          }
+        }
         if (message.status === 'recognizing text' && typeof message.progress === 'number') {
           progress('در حال خواندن نام کالاها و قیمت‌ها...', 36 + message.progress * 58);
         } else if (message.status === 'loading language traineddata') {
