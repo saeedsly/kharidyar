@@ -101,7 +101,10 @@ async function getOcrWorker(
         if (message.status === 'recognizing text' && typeof message.progress === 'number') {
           progress('در حال خواندن نام کالاها و قیمت‌ها...', 36 + message.progress * 58);
         } else if (message.status === 'loading language traineddata') {
-          progress('آماده‌سازی زبان فاکتور برای پردازش...', 28);
+          // Tesseract reports progress while each bundled language is fetched, decompressed,
+          // and cached. Reflect that work instead of leaving the UI frozen at 28% throughout.
+          const languageProgress = typeof message.progress === 'number' ? message.progress : 0;
+          progress('آماده‌سازی زبان فاکتور برای پردازش...', 28 + languageProgress * 8);
         } else if (message.status === 'loading tesseract core' || message.status === 'initializing tesseract') {
           progress('راه‌اندازی موتور اسکن روی گوشی...', 23);
         }

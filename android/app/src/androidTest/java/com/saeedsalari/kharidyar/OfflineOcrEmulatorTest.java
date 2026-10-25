@@ -87,8 +87,15 @@ public class OfflineOcrEmulatorTest {
 
             long ocrDeadline = SystemClock.elapsedRealtime() + OCR_TIMEOUT_MS;
             String lastBody = "";
+            String lastOcrProgress = "<no progress reported>";
             while (SystemClock.elapsedRealtime() < ocrDeadline) {
                 lastBody = evaluate(scenario, "document.body ? document.body.innerText : ''");
+                int percentIndex = lastBody.indexOf('٪');
+                if (percentIndex >= 0) {
+                    int contextStart = Math.max(0, percentIndex - 120);
+                    int contextEnd = Math.min(lastBody.length(), percentIndex + 12);
+                    lastOcrProgress = lastBody.substring(contextStart, contextEnd);
+                }
                 if (lastBody.contains("دقت خوانش:")) {
                     evaluate(scenario,
                         "(() => { const button = Array.from(document.querySelectorAll('button')) " +
@@ -101,10 +108,10 @@ public class OfflineOcrEmulatorTest {
                     return;
                 }
                 if (lastBody.contains("پردازش این عکس در یک دقیقه تمام نشد")) {
-                    fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR reached the app's one-minute timeout. UI: " + lastBody + " Errors: " + getPageErrors(scenario));
+                    fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR reached the app's one-minute timeout. Last progress: " + lastOcrProgress + " UI: " + lastBody + " Errors: " + getPageErrors(scenario));
                 }
                 if (lastBody.contains("خواندن فاکتور ناموفق بود") || lastBody.contains("قابل خواندن نیست")) {
-                    fail("OFFLINE_OCR_EMULATOR_ERROR: scan failed before review. UI: " + lastBody + " Errors: " + getPageErrors(scenario));
+                    fail("OFFLINE_OCR_EMULATOR_ERROR: scan failed before review. Last progress: " + lastOcrProgress + " UI: " + lastBody + " Errors: " + getPageErrors(scenario));
                 }
                 SystemClock.sleep(750);
             }
