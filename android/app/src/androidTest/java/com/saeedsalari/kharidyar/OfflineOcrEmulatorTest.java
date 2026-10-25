@@ -1,11 +1,17 @@
 package com.saeedsalari.kharidyar;
 
+import android.app.Activity;
+import android.app.Instrumentation;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.SystemClock;
+import android.view.KeyEvent;
 import android.webkit.ConsoleMessage;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.concurrent.CountDownLatch;
@@ -93,6 +99,7 @@ public class OfflineOcrEmulatorTest {
                 " Page state: " + pageState + " Console: " + browserConsole.get(),
                 body.contains("فاکتور نمونه")
             );
+            verifySystemFilePicker(scenario);
 
             evaluate(scenario,
                 "(() => { window.__emulatorOcrErrors = []; window.__emulatorOcrDebug = true; window.__emulatorOcrProgress = null; window.__emulatorOcrWorkerStatus = null; " +
@@ -126,16 +133,41 @@ public class OfflineOcrEmulatorTest {
                     String reviewedBody = evaluate(scenario, "document.body ? document.body.innerText : ''");
                     assertFalse("OCR completed but returned no recognized text.", reviewedBody.contains("متنی یافت نشد"));
                     String rawOcrText = evaluate(scenario,
-                        "(() => { const node = document.querySelector('div.font-mono'); return node ? node.innerText : ''; })()"
+                        "(() => { const node = document.querySelector('div.font-mono'); return node ? node.textContent || '' : ''; })()"
+                    );
+                    String itemNames = evaluate(scenario,
+                        "JSON.stringify(Array.from(document.querySelectorAll('[data-testid=\"receipt-item-name\"]')).map(input => input.value))"
                     );
                     int recognizedLines = 0;
                     for (String line : rawOcrText.split("\\n")) {
                         if (!line.trim().isEmpty()) recognizedLines++;
                     }
+                    String[] expectedItemNames = { "شیر", "پنیر", "تخم مرغ", "نان تست", "ماست", "چیپس" };
+                    int matchedItemNames = 0;
+                    for (String expectedName : expectedItemNames) {
+                        if (itemNames.contains(expectedName)) matchedItemNames++;
+                    }
+                    int parsedItemCount = Integer.parseInt(evaluate(scenario,
+                        "String(document.querySelectorAll('[data-testid=\"receipt-item-name\"]').length)"
+                    ));
+                    String parsedDiscount = evaluate(scenario,
+                        "document.querySelector('[data-testid=\"receipt-discount\"]')?.value || ''"
+                    );
+                    String parsedPayableTotal = evaluate(scenario,
+                        "document.querySelector('[data-testid=\"receipt-payable-total\"]')?.getAttribute('data-amount') || ''"
+                    );
                     assertTrue("OCR returned too little receipt text (" + rawOcrText.length() + " characters).", rawOcrText.length() >= 100);
-                    assertTrue("OCR returned too few receipt lines (" + recognizedLines + "): " + rawOcrText.substring(0, Math.min(400, rawOcrText.length())), recognizedLines >= 8);
+                    assertTrue("OCR returned too few receipt lines (" + recognizedLines + "). Raw text: " + rawOcrText.substring(0, Math.min(400, rawOcrText.length())), recognizedLines >= 8);
+                    assertTrue("OCR parsed " + parsedItemCount + " receipt items; expected all six. Names: " + itemNames + " Raw text: " + rawOcrText.substring(0, Math.min(400, rawOcrText.length())), parsedItemCount == 6);
+                    assertTrue("OCR missed too many sample product names (" + matchedItemNames + "/6): " + itemNames, matchedItemNames >= 5);
+                    assertTrue("OCR did not preserve the sample receipt subtotal.", rawOcrText.contains("443,000"));
+                    assertTrue("OCR did not preserve the sample discount.", rawOcrText.contains("23,000"));
+                    assertTrue("OCR did not preserve the sample payable amount.", rawOcrText.contains("420,000"));
+                    assertEquals("The discount was parsed incorrectly.", "23000", parsedDiscount);
+                    assertEquals("The payable total was parsed incorrectly.", "420000", parsedPayableTotal);
                     System.out.println("OFFLINE_OCR_EMULATOR_PASS: sample receipt produced " + rawOcrText.length() +
-                        " OCR characters across " + recognizedLines + " lines.");
+                        " OCR characters across " + recognizedLines + " lines and parsed " + parsedItemCount + " items. Names: " + itemNames +
+                        ". Discount: " + parsedDiscount + ". Payable total: " + parsedPayableTotal);
                     return;
                 }
                 if (lastBody.contains("خواندن فاکتور در زمان مجاز تمام نشد")) {
@@ -148,6 +180,64 @@ public class OfflineOcrEmulatorTest {
             }
             fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR did not reach review within the configured app timeout. Last progress: " + lastOcrProgress + " Last UI: " + lastBody + " Errors: " + getPageErrors(scenario) + " Console: " + browserConsole.get());
         }
+    }
+
+    private static void verifySystemFilePicker(ActivityScenario<MainActivity> scenario) throws Exception {
+        Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        Instrumentation.ActivityMonitor pickerMonitor = new Instrumentation.ActivityMonitor(
+            new IntentFilter(Intent.ACTION_OPEN_DOCUMENT),
+            null,
+            false
+        );
+        instrumentation.addMonitor(pickerMonitor);
+        Activity pickerActivity = null;
+        boolean pickerWasRequested = false;
+        try {
+            String openScanner = evaluate(scenario,
+                "(() => { const button = document.querySelector('button[aria-label=\"اسکن فاکتور\"]'); " +
+                "if (!button) return 'scanner-button-not-found'; button.click(); return 'scanner-opened'; })()"
+            );
+            assertEquals("The scanner could not be opened for file-picker testing.", "scanner-opened", openScanner);
+
+            long pickerButtonDeadline = SystemClock.elapsedRealtime() + 10_000;
+            String pickerClick = "picker-button-not-found";
+            while (SystemClock.elapsedRealtime() < pickerButtonDeadline && !"picker-started".equals(pickerClick)) {
+                pickerClick = evaluate(scenario,
+                    "(() => { const button = Array.from(document.querySelectorAll('button')) " +
+                    ".find(element => (element.innerText || '').includes('انتخاب فایل یا عکس')); " +
+                    "if (!button) return 'picker-button-not-found'; button.click(); return 'picker-started'; })()"
+                );
+                if (!"picker-started".equals(pickerClick)) SystemClock.sleep(250);
+            }
+            assertEquals("The file picker button was not available.", "picker-started", pickerClick);
+            pickerWasRequested = true;
+            pickerActivity = instrumentation.waitForMonitorWithTimeout(pickerMonitor, 10_000);
+            assertTrue("Android did not open the system document picker.", pickerActivity != null);
+            String pickerPackage = pickerActivity.getPackageName().toLowerCase();
+            assertTrue("Expected Android DocumentsUI, but the picker opened " + pickerPackage,
+                pickerPackage.contains("documentsui"));
+            System.out.println("OFFLINE_OCR_FILE_PICKER_PASS: ACTION_OPEN_DOCUMENT opened " + pickerPackage + ".");
+        } finally {
+            if (pickerWasRequested || pickerActivity != null) {
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+            }
+            instrumentation.removeMonitor(pickerMonitor);
+        }
+
+        long appReturnDeadline = SystemClock.elapsedRealtime() + 10_000;
+        String body = "";
+        while (SystemClock.elapsedRealtime() < appReturnDeadline) {
+            body = evaluate(scenario, "document.body ? document.body.innerText : ''");
+            if (body.contains("اسکنر هوشمند فاکتور")) break;
+            SystemClock.sleep(250);
+        }
+        assertTrue("The app did not return to its scanner after dismissing the file picker.",
+            body.contains("اسکنر هوشمند فاکتور"));
+        String closeScanner = evaluate(scenario,
+            "(() => { const button = document.querySelector('button[aria-label=\"بستن اسکنر\"]'); " +
+            "if (!button) return 'close-button-not-found'; button.click(); return 'scanner-closed'; })()"
+        );
+        assertEquals("The scanner could not be closed after the picker test.", "scanner-closed", closeScanner);
     }
 
     private static String getNativeUrl(ActivityScenario<MainActivity> scenario) {

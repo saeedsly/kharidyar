@@ -397,6 +397,7 @@ export function ScannerModal({
 
             <button
               type="button"
+              aria-label="بستن اسکنر"
               onClick={() => {
                 stopCameraStream();
                 cancelActiveOcrScan();
@@ -841,6 +842,7 @@ export function ScannerModal({
                               </span>
                             )}
                             <input
+                              data-testid="receipt-item-name"
                               type="text"
                               value={it.name}
                               onChange={(e) =>
@@ -910,6 +912,7 @@ export function ScannerModal({
                     <div className="flex items-center justify-between text-emerald-700">
                       <span>تخفیف فاکتور ({resultCurrency}):</span>
                       <input
+                        data-testid="receipt-discount"
                         type="number"
                         step={1000}
                         value={discountTotal}
@@ -929,7 +932,9 @@ export function ScannerModal({
                     </div>
                     <div className="flex justify-between border-t border-slate-200 pt-2 text-sm font-extrabold text-slate-900">
                       <span>مبلغ قابل پرداخت:</span>
-                      <span className="text-blue-600">{formatCurrency(liveGrandTotal, resultCurrency)}</span>
+                      <span data-testid="receipt-payable-total" data-amount={liveGrandTotal} className="text-blue-600">
+                        {formatCurrency(liveGrandTotal, resultCurrency)}
+                      </span>
                     </div>
                   </div>
                 </div>

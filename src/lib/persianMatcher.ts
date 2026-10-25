@@ -279,6 +279,129 @@ export function fuseDualHeadLines(lines: NeuralLineInput[]): string[] {
 const IGNORE_HEADER_KEYWORDS =
   /(تاریخ|شماره\s*فاکتور|شماره\s*فیش|نام\s*کالا|شرح\s*کالا|قیمت\s*واحد|فی\s*واحد|مبلغ\s*کل|صندوق\s*شماره|سپاسگزاریم|سامانه\s*هوشمند|تلفن|آدرس|کد\s*پستی|شناسه\s*ملی|کارتخوان|ترمینال|رهگیری|date|invoice\s*(?:no|number)|item\s*name|unit\s*price|quantity|\bsubtotal\b|\btotal\b|\bdiscount\b|\bamount\b|\bprice\b|tel|address|tarih|fi[sş]\s*(?:no|numarası)|ürün\s*adı|birim\s*fiyat|adet|telefon|adres|\btoplam\b|\bindirim\b|\btutar\b)/i;
 
+const COLLAPSED_ITEM_MARKER = /(?:^|\s)\d{1,3}\s*[-–.)]\s*(?=[\u0600-\u06FF])/g;
+const COLLAPSED_FOOTER_MARKER =
+  /(?:^|\s)(?:جمع\s*(?:اقلام|کل(?:\s*اقلام)?|فاکتور)|مبلغ\s*(?:قابل\s*پرداخت|نهایی|کل)|قابل\s*پرداخت|تخفیف|مالیات|ارزش\s*افزوده|sub\s*total|subtotal|grand\s*total|total\s*paid|amount\s*due|discount|tax|vat)(?=\s|[:：]|$)/gi;
+const COLLAPSED_HEADER_MARKER =
+  /(?:^|\s)(?:صندوق\s*شماره|تاریخ|شماره\s*(?:فاکتور|فیش)|نام(?:\s*کالا)?|شرح\s*کالا|تعداد|قیمت\s*واحد|مبلغ\s*کل)(?=\s|[:：]|$)/gi;
+const COLLAPSED_COLUMN_HEADER_MARKER =
+  /(?:^|\s)(?:نام(?:\s*کالا)?|شرح\s*کالا|تعداد|قیمت\s*واحد|فی\s*واحد|مبلغ\s*کل)(?=\s|[:：]|$)/gi;
+const COLLAPSED_HEADER_VALUE_MARKER =
+  /(?:^|\s)(?:تاریخ\s*[:：]?\s*\d{1,4}[/.\-]\d{1,2}[/.\-]\d{1,4}|شماره\s*(?:فاکتور|فیش)\s*[:：]?\s*[A-Za-z0-9-]{2,16}|صندوق\s*شماره\s*[:：]?\s*\d{1,8})/gi;
+const COLLAPSED_QUANTITY_MARKER =
+  /(?:^|\s)\d{1,2}(?:[.,]\d+)?\s*(?:عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)(?=\s|$)/gi;
+
+function findMarkerStarts(text: string, marker: RegExp): number[] {
+  const starts: number[] = [];
+  marker.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(text)) !== null) {
+    let leadingWhitespace = 0;
+    while (leadingWhitespace < match[0].length && /\s/.test(match[0][leadingWhitespace])) {
+      leadingWhitespace++;
+    }
+    starts.push(match.index + leadingWhitespace);
+    if (match[0].length === 0) marker.lastIndex++;
+  }
+  return starts;
+}
+
+function splitTextAtMarkers(text: string, markerStarts: number[]): string[] {
+  const starts = Array.from(new Set([0, ...markerStarts]))
+    .filter((start) => start >= 0 && start < text.length)
+    .sort((first, second) => first - second);
+  return starts
+    .map((start, index) => text.slice(start, starts[index + 1] ?? text.length).trim())
+    .filter(Boolean);
+}
+
+function findLastMarkerEndBefore(text: string, marker: RegExp, before: number): number {
+  let lastEnd = 0;
+  marker.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(text)) !== null) {
+    const end = match.index + match[0].length;
+    if (end <= before) lastEnd = end;
+    if (match[0].length === 0) marker.lastIndex++;
+  }
+  return lastEnd;
+}
+
+function findLastPriceEndBefore(text: string, before: number, after: number): number {
+  const pricePattern = new RegExp(PRICE_TOKEN_REGEX.source, 'g');
+  let lastEnd = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pricePattern.exec(text)) !== null) {
+    const end = match.index + match[0].length;
+    if (end <= before && end > after) lastEnd = end;
+  }
+  return lastEnd;
+}
+
+function skipWhitespace(text: string, start: number): number {
+  let index = start;
+  while (index < text.length && /\s/.test(text[index])) index++;
+  return index;
+}
+
+function recoverCollapsedUnnumberedRows(line: string): string[] | null {
+  const quantityStarts = findMarkerStarts(line, COLLAPSED_QUANTITY_MARKER);
+  if (quantityStarts.length === 0) return null;
+
+  const columnHeaderEnd = findLastMarkerEndBefore(line, COLLAPSED_COLUMN_HEADER_MARKER, quantityStarts[0]);
+  const metadataValueEnd = findLastMarkerEndBefore(line, COLLAPSED_HEADER_VALUE_MARKER, quantityStarts[0]);
+  const genericHeaderEnd = findLastMarkerEndBefore(line, COLLAPSED_HEADER_MARKER, quantityStarts[0]);
+  const firstItemStart = skipWhitespace(line, columnHeaderEnd || metadataValueEnd || genericHeaderEnd);
+  if (firstItemStart <= 0 || firstItemStart >= quantityStarts[0]) return null;
+
+  const rowStarts = [firstItemStart];
+  for (const quantityStart of quantityStarts.slice(1)) {
+    const previousPriceEnd = findLastPriceEndBefore(line, quantityStart, rowStarts[rowStarts.length - 1]);
+    const nextItemStart = skipWhitespace(line, previousPriceEnd);
+    if (previousPriceEnd > rowStarts[rowStarts.length - 1] && nextItemStart < quantityStart) {
+      rowStarts.push(nextItemStart);
+    }
+  }
+
+  const header = line.slice(0, firstItemStart).trim();
+  const recovered = header
+    ? splitTextAtMarkers(header, findMarkerStarts(header, COLLAPSED_HEADER_MARKER))
+    : [];
+  const rowsStart = line.slice(firstItemStart);
+  const footerStarts = findMarkerStarts(line, COLLAPSED_FOOTER_MARKER)
+    .filter((start) => start >= firstItemStart)
+    .map((start) => start - firstItemStart);
+  recovered.push(
+    ...splitTextAtMarkers(
+      rowsStart,
+      [...rowStarts.map((start) => start - firstItemStart), ...footerStarts]
+    )
+  );
+  return recovered.length > 1 ? recovered : null;
+}
+
+/** Restores product rows when OCR returns an entire receipt as one text line. */
+export function recoverCollapsedReceiptLines(lines: string[]): string[] {
+  return lines.flatMap((sourceLine) => {
+    const line = normalizePersianText(sourceLine);
+    const itemStarts = findMarkerStarts(line, COLLAPSED_ITEM_MARKER);
+    if (itemStarts.length === 0) return recoverCollapsedUnnumberedRows(line) || [line];
+
+    const footerStarts = findMarkerStarts(line, COLLAPSED_FOOTER_MARKER);
+    const firstItemStart = Math.min(...itemStarts);
+    const header = line.slice(0, firstItemStart).trim();
+    const recovered = header
+      ? splitTextAtMarkers(header, findMarkerStarts(header, COLLAPSED_HEADER_MARKER))
+      : [];
+    const rowsStart = line.slice(firstItemStart);
+    const rowMarkers = [...itemStarts, ...footerStarts]
+      .filter((start) => start >= firstItemStart)
+      .map((start) => start - firstItemStart);
+    recovered.push(...splitTextAtMarkers(rowsStart, rowMarkers));
+    return recovered.length ? recovered : [line];
+  });
+}
+
 /**
  * Universal Iranian Receipt NLP Parser v2
  * Supports:
@@ -292,11 +415,16 @@ export function parsePersianReceiptText(
   lineBoxes: BoundingBox[] = [],
   ocrConfidence = 92
 ) {
-  const rawLines = (Array.isArray(linesOrText) ? linesOrText : linesOrText.split(/\r?\n/))
-    .map((l) => normalizePersianText(l))
-    .filter((l) => l.length > 1);
+  const rawLines = recoverCollapsedReceiptLines(
+    (Array.isArray(linesOrText) ? linesOrText : linesOrText.split(/\r?\n/))
+      .map((line) => normalizePersianText(line))
+      .filter((line) => line.length > 1)
+  );
 
   const fullText = rawLines.join('\n');
+  const safeOcrConfidence = Number.isFinite(ocrConfidence)
+    ? Math.max(0, Math.min(100, ocrConfidence))
+    : 0;
   const explicitLira = /(₺|\bTRY\b|\bTL\b|\blira\b)/i.test(fullText);
   const explicitToman = /(تومان|تومن)/.test(fullText);
   const explicitRial = /ریال/.test(fullText) && !explicitToman && !explicitLira;
@@ -342,7 +470,10 @@ export function parsePersianReceiptText(
       !IGNORE_HEADER_KEYWORDS.test(line) &&
       extractPricesFromText(line, explicitLira).length === 0
     ) {
-      const cleanedTitle = line.replace(/^[^\u0600-\u06FF\u00C0-\u024Fa-zA-Z]+/, '').trim();
+      const cleanedTitle = line
+        .replace(/^[^\u0600-\u06FF\u00C0-\u024Fa-zA-Z]+/, '')
+        .replace(/[-–—:]+$/, '')
+        .trim();
       if (cleanedTitle.length >= 3) {
         storeName = cleanedTitle;
         continue;
@@ -350,7 +481,8 @@ export function parsePersianReceiptText(
     }
 
     const linePrices = extractPricesFromText(line, explicitLira);
-    if ((IGNORE_HEADER_KEYWORDS.test(line) && linePrices.length === 0) || /^شعبه\s/.test(line)) {
+    const isReceiptMetadata = /(?:تاریخ|شماره\s*فاکتور|شماره\s*فیش|صندوق\s*شماره|invoice\s*(?:no|number))/i.test(line);
+    if ((IGNORE_HEADER_KEYWORDS.test(line) && linePrices.length === 0) || isReceiptMetadata || /^شعبه\s/.test(line)) {
       pendingProductTitle = null;
       continue;
     }
@@ -467,7 +599,7 @@ export function parsePersianReceiptText(
 
     if (persianLetterCount >= 2) {
       finalName = persianPart
-        .replace(/\b(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)\b/gi, '')
+        .replace(/(?:^|\s)(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)(?=\s|$)/gi, ' ')
         .replace(/\b\d+\b/g, '')
         .replace(/\s+/g, ' ')
         .trim();
@@ -523,7 +655,7 @@ export function parsePersianReceiptText(
     total_price: roundReceiptAmount(r.totalPrice),
     discount: 0,
     category: inferItemCategory(r.name),
-    confidence: Math.min(99.2, Math.max(87, ocrConfidence + 5)),
+    confidence: Number(safeOcrConfidence.toFixed(1)),
     bbox: r.bbox,
   }));
 
@@ -549,7 +681,7 @@ export function parsePersianReceiptText(
     total_amount: totalAmount,
     currency: explicitLira ? 'لیر' : 'تومان',
     detected_rial: explicitRial || implicitRial,
-    ocr_confidence: Number(Math.min(99.2, Math.max(86, ocrConfidence + 5)).toFixed(1)),
+    ocr_confidence: Number(safeOcrConfidence.toFixed(1)),
     items,
   };
 }

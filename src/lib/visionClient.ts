@@ -6,6 +6,7 @@ import { OfflineOcrAssets, type NativeOcrResult } from './offlineOcrAssets';
 import {
   parsePersianReceiptText,
   reconcileReceiptWithShoppingList,
+  recoverCollapsedReceiptLines,
 } from './persianMatcher';
 
 export type ReceiptOcrLanguage = 'fa-en' | 'tr-en';
@@ -408,7 +409,8 @@ export async function runOnDeviceAutonomousScan(
             confidence: Math.round(recognized.confidence || 0),
           }));
         }
-        confidence = Number(recognized.confidence || 75);
+        const nativeConfidence = Number(recognized.confidence);
+        confidence = Number.isFinite(nativeConfidence) ? nativeConfidence : 75;
       } finally {
         await nativeProgressListener.remove();
       }
@@ -442,11 +444,14 @@ export async function runOnDeviceAutonomousScan(
         text: line.text?.trim() || '',
         confidence: Math.round(line.confidence || 0),
       }));
-      confidence = Number(recognized.data.confidence || 75);
+      const workerConfidence = Number(recognized.data.confidence);
+      confidence = Number.isFinite(workerConfidence) ? workerConfidence : 75;
     }
 
+    const recoveredLines = recoverCollapsedReceiptLines(rawLines);
+    const recoveredLineBoxes = recoveredLines.length === lineBoxes.length ? lineBoxes : [];
     progress('تطبیق اقلام با چک‌لیست خرید...', 96);
-    const parsed = parsePersianReceiptText(rawLines, lineBoxes, confidence);
+    const parsed = parsePersianReceiptText(recoveredLines, recoveredLineBoxes, confidence);
     const reconciliation = reconcileReceiptWithShoppingList(parsed.items, shoppingItems);
     progress('فاکتور آمادهٔ بازبینی است.', 100);
     resetIdleTimer();
@@ -458,12 +463,12 @@ export async function runOnDeviceAutonomousScan(
       originalImageUrl: previewUrl,
       processedImageUrl: previewUrl,
       perspectiveCropped: false,
-      lineBoxes,
-      rawOcrText: rawLines.join('\n'),
+      lineBoxes: recoveredLineBoxes,
+      rawOcrText: recoveredLines.join('\n'),
       receipt: {
         ...parsed,
         ocr_engine: language === 'tr-en' ? 'Tesseract TUR+ENG Offline' : 'Tesseract FAS+ENG Offline',
-        raw_ocr_text: rawLines.join('\n'),
+        raw_ocr_text: recoveredLines.join('\n'),
         image_url: previewUrl,
         processed_image_url: previewUrl,
       },
