@@ -15,6 +15,23 @@ const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
 const MAX_RECEIPT_EDGE = 1500;
 const MAX_SCAN_TIME_MS = 60_000;
 const WORKER_IDLE_MS = 60_000;
+const WASM_SIMD_PROBE = new Uint8Array([
+  0, 97, 115, 109, 1, 0, 0, 0,
+  1, 5, 1, 96, 0, 1, 123,
+  3, 2, 1, 0,
+  10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11,
+]);
+
+function getOcrCorePath(): string {
+  let simdSupported = false;
+  try {
+    simdSupported = typeof WebAssembly !== 'undefined' && WebAssembly.validate(WASM_SIMD_PROBE);
+  } catch {
+    // Older WebViews can throw for unsupported wasm features; use the baseline core.
+  }
+  const coreFile = simdSupported ? 'tesseract-core-simd-lstm.wasm.js' : 'tesseract-core-lstm.wasm.js';
+  return assetUrl(`tessdata/${coreFile}`);
+}
 
 type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
 let workerPromise: Promise<OcrWorker> | null = null;
@@ -104,7 +121,9 @@ async function getOcrWorker(
     const createWorkerOptions = {
       workerBlobURL: false,
       workerPath: assetUrl('tessdata/worker.min.js'),
-      corePath: assetUrl('tessdata').replace(/\/$/, ''),
+      // Select a concrete JS core after a tiny synchronous feature probe. This
+      // avoids Tesseract's asynchronous worker-side SIMD probe on legacy WebViews.
+      corePath: getOcrCorePath(),
       langPath: assetUrl('tessdata').replace(/\/$/, ''),
       gzip: true,
       cacheMethod: 'write',

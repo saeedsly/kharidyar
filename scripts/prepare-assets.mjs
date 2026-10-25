@@ -47,6 +47,18 @@ for (const [source, name] of assets) {
     // Chrome 69 (Android 7's WebView) cannot parse. They are copied outside
     // Vite's module graph, so transpile every standalone JS worker/core here.
     let sourceCode = fs.readFileSync(source, 'utf8');
+    if (name === 'worker.min.js') {
+      // Surface whether the Android WebView's WebAssembly compiler actually
+      // resolves; Tesseract otherwise reports no progress while Core() awaits it.
+      const wasmProbe = sourceCode.replace(
+        /r\.progress\(\{workerId:n,status:f,progress:0\}\),h\(\{TesseractProgress:/,
+        () => `r.progress({workerId:n,status:f,progress:0}),(()=>{const wasm=global.WebAssembly;const instantiate=wasm.instantiate;wasm.instantiate=function(){r.progress({workerId:n,status:'wasm instantiate started',progress:0});let result;try{result=instantiate.apply(wasm,arguments)}catch(error){r.progress({workerId:n,status:'wasm instantiate threw',progress:0});throw error}return result.then(value=>{r.progress({workerId:n,status:'wasm instantiate resolved',progress:0});return value},error=>{r.progress({workerId:n,status:'wasm instantiate rejected',progress:0});throw error})}})(),h({TesseractProgress:`
+      );
+      if (wasmProbe === sourceCode) {
+        throw new Error('[prepare-assets] Could not instrument Tesseract WASM initialization');
+      }
+      sourceCode = wasmProbe;
+    }
     if (name.startsWith('tesseract-core-') && name.endsWith('.wasm.js')) {
       // Chrome 69 can hang when Emscripten tries streaming compilation from an
       // embedded data: URL in a Web Worker. Decode the bundled bytes directly
