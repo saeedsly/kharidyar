@@ -15,6 +15,9 @@ export default defineConfig({
     },
   },
   build: {
+    // Android 7's Chrome 69 WebView is supported; transpile newer operators such
+    // as optional chaining/nullish coalescing instead of shipping them untransformed.
+    target: 'chrome69',
     outDir: 'dist',
     sourcemap: false,
     chunkSizeWarningLimit: 1800,
