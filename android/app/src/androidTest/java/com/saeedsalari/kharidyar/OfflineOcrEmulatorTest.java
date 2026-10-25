@@ -133,7 +133,7 @@ public class OfflineOcrEmulatorTest {
                         if (!line.trim().isEmpty()) recognizedLines++;
                     }
                     assertTrue("OCR returned too little receipt text (" + rawOcrText.length() + " characters).", rawOcrText.length() >= 100);
-                    assertTrue("OCR returned too few receipt lines (" + recognizedLines + ").", recognizedLines >= 5);
+                    assertTrue("OCR returned too few receipt lines (" + recognizedLines + "): " + rawOcrText.substring(0, Math.min(400, rawOcrText.length())), recognizedLines >= 8);
                     System.out.println("OFFLINE_OCR_EMULATOR_PASS: sample receipt produced " + rawOcrText.length() +
                         " OCR characters across " + recognizedLines + " lines.");
                     return;

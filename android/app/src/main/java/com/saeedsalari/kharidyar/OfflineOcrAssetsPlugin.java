@@ -241,7 +241,7 @@ public class OfflineOcrAssetsPlugin extends Plugin {
             int minimumCharacters = Math.max(80, Math.min(200, bitmap.getHeight() / 10));
             return result.confidence < 75 || result.lines.length() < 10 || textLength < minimumCharacters;
         }
-        return result.confidence < 60 || result.lines.length() < 5 || textLength < 80;
+        return result.confidence < 60 || result.lines.length() < 8 || textLength < 80;
     }
 
     private void performRecognition(PluginCall call, String imageBase64, String language, int expectedWidth, int expectedHeight) {
