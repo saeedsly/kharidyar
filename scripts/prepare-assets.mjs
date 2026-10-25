@@ -26,9 +26,10 @@ const assets = [
   [path.join(rootDir, 'node_modules/tesseract.js/dist/worker.min.js'), 'worker.min.js'],
 ];
 
-// Package only LSTM WASM runtimes. The previous build copied every legacy, SIMD and non-SIMD
-// variant (about 47 MiB); the app needs just these three compatibility paths for Android 7–15.
-for (const variant of ['lstm', 'simd-lstm', 'relaxedsimd-lstm']) {
+// Package only the LSTM WASM runtimes needed by Android 7–15. Keep the baseline
+// runtime built with Tesseract.js Core 5.1.1: Core 6 adds the DataCount/bulk-memory
+// WASM section that Android 7's Chrome 69 WebView cannot decode.
+for (const variant of ['lstm', 'simd-lstm']) {
   assets.push(
     [path.join(coreDir, `tesseract-core-${variant}.wasm.js`), `tesseract-core-${variant}.wasm.js`],
     [path.join(coreDir, `tesseract-core-${variant}.wasm`), `tesseract-core-${variant}.wasm`]
