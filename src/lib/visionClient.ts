@@ -100,14 +100,15 @@ async function getOcrWorker(
   if (!workerPromise) {
     workerLanguage = languageCode;
     progress('بارگذاری موتور اسکن آفلاین...', 22);
-    const created = createWorker(languageCode, 1, {
+    const createWorkerOptions = {
       workerBlobURL: false,
       workerPath: assetUrl('tessdata/worker.min.js'),
       corePath: assetUrl('tessdata').replace(/\/$/, ''),
       langPath: assetUrl('tessdata').replace(/\/$/, ''),
       gzip: true,
       cacheMethod: 'write',
-      logger: (message) => {
+      logging: typeof window !== 'undefined' && Boolean((window as any).__emulatorOcrDebug),
+      logger: (message: { status: string; progress?: number }) => {
         if (message.status === 'recognizing text' && typeof message.progress === 'number') {
           progress('در حال خواندن نام کالاها و قیمت‌ها...', 36 + message.progress * 58);
         } else if (message.status === 'loading language traineddata') {
@@ -119,7 +120,8 @@ async function getOcrWorker(
           progress('راه‌اندازی موتور اسکن روی گوشی...', 23);
         }
       },
-    });
+    };
+    const created = createWorker(languageCode, 1, createWorkerOptions as Parameters<typeof createWorker>[2]);
 
     let trackedPromise: Promise<OcrWorker>;
     trackedPromise = created.then(

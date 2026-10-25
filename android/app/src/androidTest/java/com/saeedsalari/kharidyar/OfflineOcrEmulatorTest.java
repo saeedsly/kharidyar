@@ -106,14 +106,14 @@ public class OfflineOcrEmulatorTest {
                     return;
                 }
                 if (lastBody.contains("پردازش این عکس در یک دقیقه تمام نشد")) {
-                    fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR reached the app's one-minute timeout. Last progress: " + lastOcrProgress + " UI: " + lastBody + " Errors: " + getPageErrors(scenario));
+                    fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR reached the app's one-minute timeout. Last progress: " + lastOcrProgress + " UI: " + lastBody + " Errors: " + getPageErrors(scenario) + " Console: " + browserConsole.get());
                 }
                 if (lastBody.contains("خواندن فاکتور ناموفق بود") || lastBody.contains("قابل خواندن نیست")) {
                     fail("OFFLINE_OCR_EMULATOR_ERROR: scan failed before review. Last progress: " + lastOcrProgress + " UI: " + lastBody + " Errors: " + getPageErrors(scenario));
                 }
                 SystemClock.sleep(750);
             }
-            fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR did not reach review within 75 seconds. Last UI: " + lastBody + " Errors: " + getPageErrors(scenario));
+            fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR did not reach review within 75 seconds. Last progress: " + lastOcrProgress + " Last UI: " + lastBody + " Errors: " + getPageErrors(scenario) + " Console: " + browserConsole.get());
         }
     }
 
