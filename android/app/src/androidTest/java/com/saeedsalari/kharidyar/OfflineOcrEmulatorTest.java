@@ -99,6 +99,12 @@ public class OfflineOcrEmulatorTest {
                     ".filter(Boolean).join(' | '); return JSON.stringify({percent, stage}); })()"
                 );
                 if (progressSnapshot.contains("٪")) lastOcrProgress = progressSnapshot;
+                int scanningLabelIndex = lastBody.indexOf("در حال خوانش هوشمند فاکتور");
+                if (scanningLabelIndex >= 0) {
+                    int contextStart = Math.max(0, scanningLabelIndex - 80);
+                    int contextEnd = Math.min(lastBody.length(), scanningLabelIndex + 180);
+                    lastOcrProgress = lastBody.substring(contextStart, contextEnd);
+                }
                 if (lastBody.contains("دقت خوانش:")) {
                     evaluate(scenario,
                         "(() => { const button = Array.from(document.querySelectorAll('button')) " +
