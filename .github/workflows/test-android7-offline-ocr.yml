@@ -49,6 +49,7 @@ jobs:
           npx cap sync android
 
       - name: Run OCR test in Android 7 emulator with network disabled
+        id: android7_test
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 24
@@ -57,51 +58,54 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           disable-animations: true
+          working-directory: android
           script: |
-            set +e
             adb shell svc wifi disable >/dev/null 2>&1 || true
             adb shell svc data disable >/dev/null 2>&1 || true
-            cd android
-            ./gradlew --no-daemon connectedDebugAndroidTest > ../emulator-test.log 2>&1
-            test_status=$?
-            cd ..
-            cat emulator-test.log
-            python3 - "$test_status" <<'PY'
-            import glob
-            import html
-            import sys
-            import xml.etree.ElementTree as ET
+            ./gradlew --no-daemon connectedDebugAndroidTest
 
-            status = int(sys.argv[1])
-            paths = glob.glob('android/app/build/outputs/androidTest-results/connected/**/*.xml', recursive=True)
-            paths += glob.glob('android/app/build/test-results/**/*.xml', recursive=True)
-            failures = []
-            for path in paths:
-                try:
-                    root = ET.parse(path).getroot()
-                except Exception:
-                    continue
-                for case in root.iter('testcase'):
-                    failure = case.find('failure')
-                    if failure is None:
-                        failure = case.find('error')
-                    if failure is not None:
-                        detail = failure.get('message') or failure.text or 'Instrumentation test failed'
-                        failures.append(f"{case.get('name', 'OCR test')}: {detail}")
+      - name: Summarize emulator OCR result
+        if: always()
+        env:
+          OCR_TEST_OUTCOME: ${{ steps.android7_test.outcome }}
+        run: |
+          python3 - <<'PY'
+          import glob
+          import html
+          import os
+          import xml.etree.ElementTree as ET
 
-            if status == 0:
-                message = 'PASS: bundled receipt OCR completed on Android 7 API 24 with Wi-Fi and mobile data disabled.'
-                print('::notice title=Android 7 offline OCR::' + message)
-                with open('emulator-summary.md', 'w', encoding='utf-8') as out:
-                    out.write('## Android 7 offline OCR emulator test\n\n' + message + '\n')
-            else:
-                message = ' | '.join(failures) if failures else 'Gradle or emulator failed before returning an OCR test result.'
-                message = html.escape(message[:5000]).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-                print('::error title=Android 7 offline OCR::' + message)
-                with open('emulator-summary.md', 'w', encoding='utf-8') as out:
-                    out.write('## Android 7 offline OCR emulator test — FAILED\n\n' + message + '\n')
-            PY
-            exit "$test_status"
+          outcome = os.environ.get('OCR_TEST_OUTCOME', 'unknown')
+          paths = glob.glob('android/app/build/outputs/androidTest-results/connected/**/*.xml', recursive=True)
+          paths += glob.glob('android/app/build/test-results/**/*.xml', recursive=True)
+          failures = []
+          for path in paths:
+              try:
+                  root = ET.parse(path).getroot()
+              except Exception:
+                  continue
+              for case in root.iter('testcase'):
+                  failure = case.find('failure')
+                  if failure is None:
+                      failure = case.find('error')
+                  if failure is not None:
+                      detail = failure.get('message') or failure.text or 'Instrumentation test failed'
+                      failures.append(f"{case.get('name', 'OCR test')}: {detail}")
+
+          if outcome == 'success':
+              message = 'PASS: bundled receipt OCR completed on Android 7 API 24 with Wi-Fi and mobile data disabled.'
+              print('::notice title=Android 7 offline OCR::' + message)
+              summary = '## Android 7 offline OCR emulator test\n\n' + message + '\n'
+          else:
+              message = ' | '.join(failures) if failures else f'Emulator test outcome: {outcome}. No JUnit failure details were produced.'
+              message = html.escape(message[:5000]).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print('::error title=Android 7 offline OCR::' + message)
+              summary = '## Android 7 offline OCR emulator test — FAILED\n\n' + message + '\n'
+          with open('emulator-summary.md', 'w', encoding='utf-8') as out:
+              out.write(summary)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
+              out.write(summary)
+          PY
 
       - name: Upload emulator test report
         if: always()
