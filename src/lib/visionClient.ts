@@ -26,7 +26,17 @@ let cancelRequested = false;
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
 function progress(stage: string, percent: number) {
-  activeProgress?.(stage, Math.max(0, Math.min(98, Math.round(percent))));
+  const normalizedPercent = Math.max(0, Math.min(98, Math.round(percent)));
+  if (typeof window !== 'undefined') {
+    const debugWindow = window as Window & {
+      __emulatorOcrDebug?: boolean;
+      __emulatorOcrProgress?: { stage: string; percent: number };
+    };
+    if (debugWindow.__emulatorOcrDebug) {
+      debugWindow.__emulatorOcrProgress = { stage, percent: normalizedPercent };
+    }
+  }
+  activeProgress?.(stage, normalizedPercent);
 }
 
 function resetIdleTimer() {

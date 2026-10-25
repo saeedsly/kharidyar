@@ -72,7 +72,7 @@ public class OfflineOcrEmulatorTest {
             );
 
             evaluate(scenario,
-                "(() => { window.__emulatorOcrErrors = []; " +
+                "(() => { window.__emulatorOcrErrors = []; window.__emulatorOcrDebug = true; window.__emulatorOcrProgress = null; " +
                 "window.addEventListener('error', e => window.__emulatorOcrErrors.push(String(e.message || e.error || 'window error'))); " +
                 "window.addEventListener('unhandledrejection', e => window.__emulatorOcrErrors.push(String(e.reason || 'unhandled rejection'))); " +
                 "return 'armed'; })()"
@@ -91,20 +91,9 @@ public class OfflineOcrEmulatorTest {
             while (SystemClock.elapsedRealtime() < ocrDeadline) {
                 lastBody = evaluate(scenario, "document.body ? document.body.innerText : ''");
                 String progressSnapshot = evaluate(scenario,
-                    "(() => { const modal = Array.from(document.querySelectorAll('.fixed.inset-0')) " +
-                    ".find(node => (node.textContent || '').includes('اسکنر هوشمند فاکتور')); if (!modal) return ''; " +
-                    "const percent = Array.from(modal.querySelectorAll('span')).map(node => node.textContent || '') " +
-                    ".find(text => text.includes('٪')) || ''; " +
-                    "const stage = Array.from(modal.querySelectorAll('p')).map(node => (node.textContent || '').trim()) " +
-                    ".filter(Boolean).join(' | '); return JSON.stringify({percent, stage}); })()"
+                    "JSON.stringify(window.__emulatorOcrProgress || {})"
                 );
-                if (progressSnapshot.contains("٪")) lastOcrProgress = progressSnapshot;
-                int scanningLabelIndex = lastBody.indexOf("در حال خوانش هوشمند فاکتور");
-                if (scanningLabelIndex >= 0) {
-                    int contextStart = Math.max(0, scanningLabelIndex - 80);
-                    int contextEnd = Math.min(lastBody.length(), scanningLabelIndex + 180);
-                    lastOcrProgress = lastBody.substring(contextStart, contextEnd);
-                }
+                if (!"{}".equals(progressSnapshot)) lastOcrProgress = progressSnapshot;
                 if (lastBody.contains("دقت خوانش:")) {
                     evaluate(scenario,
                         "(() => { const button = Array.from(document.querySelectorAll('button')) " +
