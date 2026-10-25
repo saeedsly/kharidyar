@@ -10,13 +10,11 @@ const PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
 const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
 
 export function toEnglishDigits(input: string | number | null | undefined): string {
-  let str = String(input ?? '');
-  for (let i = 0; i < 10; i++) {
-    str = str
-      .replaceAll(PERSIAN_DIGITS[i], String(i))
-      .replaceAll(ARABIC_DIGITS[i], String(i));
-  }
-  return str;
+  return String(input ?? '').replace(/[۰-۹٠-٩]/g, (digit) => {
+    const persianDigit = PERSIAN_DIGITS.indexOf(digit);
+    const digitValue = persianDigit >= 0 ? persianDigit : ARABIC_DIGITS.indexOf(digit);
+    return String(digitValue);
+  });
 }
 
 export function toPersianDigits(input: string | number | null | undefined): string {
