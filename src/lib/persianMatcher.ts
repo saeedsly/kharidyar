@@ -663,8 +663,12 @@ export function parsePersianReceiptText(
   }));
 
   const computedSum = items.reduce((acc, it) => acc + it.total_price, 0);
+  const rawItemsSubtotal = rawItems.reduce((acc, item) => acc + item.totalPrice, 0);
+  const subtotalSource = rawSubtotal > 0 ? rawSubtotal : rawItemsSubtotal;
   const subtotal = rawSubtotal > 0 ? roundReceiptAmount(rawSubtotal) : computedSum;
-  const discountTotal = roundReceiptAmount(rawDiscount);
+  const inferredDiscount =
+    rawTotal > 0 ? Math.max(0, subtotalSource + rawTax - rawTotal) : 0;
+  const discountTotal = roundReceiptAmount(rawDiscount > 0 ? rawDiscount : inferredDiscount);
   const taxTotal = roundReceiptAmount(rawTax);
   const totalAmount =
     rawTotal > 0

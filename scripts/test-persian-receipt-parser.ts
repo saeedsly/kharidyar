@@ -20,6 +20,14 @@ assert.equal(receipt.total_amount, 420_000);
 assert.equal(receipt.ocr_confidence, 92);
 assert.equal(parsePersianReceiptText([collapsedReceipt], [], 28).ocr_confidence, 28);
 assert.equal(receipt.items.length, 6);
+
+const receiptWithUnreadableDiscountLabel = parsePersianReceiptText(
+  recoveredLines.map((line) => (line.startsWith('تخفیف خرید:') ? line.replace('تخفیف خرید: ', '') : line))
+);
+assert.equal(receiptWithUnreadableDiscountLabel.items.length, 6);
+assert.equal(receiptWithUnreadableDiscountLabel.subtotal, 443_000);
+assert.equal(receiptWithUnreadableDiscountLabel.discount_total, 23_000);
+assert.equal(receiptWithUnreadableDiscountLabel.total_amount, 420_000);
 assert.deepEqual(
   receipt.items.map(({ name, quantity, unit_price, total_price }) => ({ name, quantity, unit_price, total_price })),
   [
