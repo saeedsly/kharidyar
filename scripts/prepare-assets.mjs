@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { transform } from 'esbuild';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -38,7 +39,20 @@ for (const [source, name] of assets) {
   if (!fs.existsSync(source)) {
     throw new Error(`[prepare-assets] Required offline OCR asset not found: ${source}`);
   }
-  fs.copyFileSync(source, path.join(targetDir, name));
+
+  const destination = path.join(targetDir, name);
+  if (name.endsWith('.js')) {
+    // Tesseract.js core bundles ship optional chaining/nullish coalescing that
+    // Chrome 69 (Android 7's WebView) cannot parse. They are copied outside
+    // Vite's module graph, so transpile every standalone JS worker/core here.
+    const { code } = await transform(fs.readFileSync(source, 'utf8'), {
+      target: 'chrome69',
+      minify: true,
+    });
+    fs.writeFileSync(destination, code);
+  } else {
+    fs.copyFileSync(source, destination);
+  }
 }
 
 const totalBytes = fs
