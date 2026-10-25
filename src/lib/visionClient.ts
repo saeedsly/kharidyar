@@ -17,6 +17,7 @@ const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
 const MAX_RECEIPT_EDGE = 1500;
 const MAX_SCAN_TIME_MS = 60_000;
 const WORKER_IDLE_MS = 60_000;
+const WASM_BASELINE_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
 const WASM_SIMD_PROBE = new Uint8Array([
   0, 97, 115, 109, 1, 0, 0, 0,
   1, 5, 1, 96, 0, 1, 123,
@@ -25,29 +26,20 @@ const WASM_SIMD_PROBE = new Uint8Array([
 ]);
 
 function getOcrCorePath(): string {
-  const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
-  const androidVersion = /Android\s+(\d+)/i.exec(userAgent)?.[1];
-  const chromeVersion = /Chrome\/(\d+)/i.exec(userAgent)?.[1];
-  const legacyAndroidWebView = Boolean(
-    androidVersion && (
-      Number(androidVersion) <= 7 ||
-      (chromeVersion && Number(chromeVersion) < 75)
-    )
-  );
-
-  let coreFile: string;
-  if (legacyAndroidWebView) {
-    coreFile = 'tesseract-core-asm.js';
-  } else {
-    let simdSupported = false;
-    try {
-      simdSupported = typeof WebAssembly !== 'undefined' && WebAssembly.validate(WASM_SIMD_PROBE);
-    } catch {
-      // Older WebViews can throw for unsupported wasm features; use the baseline core.
-    }
-    coreFile = simdSupported ? 'tesseract-core-simd-lstm.wasm.js' : 'tesseract-core-lstm.wasm.js';
+  let wasmSupported = false;
+  let simdSupported = false;
+  try {
+    wasmSupported = typeof WebAssembly !== 'undefined' && WebAssembly.validate(WASM_BASELINE_PROBE);
+    simdSupported = wasmSupported && WebAssembly.validate(WASM_SIMD_PROBE);
+  } catch {
+    // Fall back to the compatible asm.js runtime if a legacy WebView rejects wasm probes.
   }
 
+  const coreFile = !wasmSupported
+    ? 'tesseract-core-asm.js'
+    : simdSupported
+      ? 'tesseract-core-simd-lstm.wasm.js'
+      : 'tesseract-core-lstm.wasm.js';
   const corePath = assetUrl(`tessdata/${coreFile}`);
   if (typeof window !== 'undefined') {
     const debugWindow = window as Window & {
