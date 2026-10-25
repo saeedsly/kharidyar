@@ -6,8 +6,14 @@ import { transform } from 'esbuild';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const targetDir = path.join(rootDir, 'public', 'tessdata');
+// Keep native model copies outside Capacitor's managed assets/public directory.
+// `cap sync` replaces that web-assets directory, while Android reads these
+// private copies directly from the APK through AssetManager.
+const nativeModelDir = path.join(rootDir, 'android', 'app', 'src', 'main', 'assets', 'offline-ocr');
 fs.rmSync(targetDir, { recursive: true, force: true });
+fs.rmSync(nativeModelDir, { recursive: true, force: true });
 fs.mkdirSync(targetDir, { recursive: true });
+fs.mkdirSync(nativeModelDir, { recursive: true });
 
 const coreDir = path.join(rootDir, 'node_modules/tesseract.js-core');
 const asmCoreDir = path.join(rootDir, 'node_modules/tesseract.js-core-asm');
@@ -106,9 +112,18 @@ for (const [source, name] of assets) {
   }
 }
 
+for (const code of ['fas', 'eng', 'tur']) {
+  const modelFile = `${code}.traineddata.gz`;
+  fs.copyFileSync(path.join(targetDir, modelFile), path.join(nativeModelDir, modelFile));
+}
+
 const totalBytes = fs
   .readdirSync(targetDir)
   .reduce((sum, name) => sum + fs.statSync(path.join(targetDir, name)).size, 0);
+const nativeModelBytes = ['fas', 'eng', 'tur'].reduce(
+  (sum, code) => sum + fs.statSync(path.join(nativeModelDir, `${code}.traineddata.gz`)).size,
+  0
+);
 console.log(
-  `[prepare-assets] Copied ${assets.length} offline OCR assets (${(totalBytes / 1024 / 1024).toFixed(1)} MiB) into public/tessdata/`
+  `[prepare-assets] Copied ${assets.length} offline OCR assets (${(totalBytes / 1024 / 1024).toFixed(1)} MiB) into public/tessdata/ and staged 3 native Android models (${(nativeModelBytes / 1024 / 1024).toFixed(1)} MiB) in android/app/src/main/assets/offline-ocr/`
 );

@@ -6,6 +6,8 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,7 +28,18 @@ public class OfflineOcrEmulatorTest {
     public void bundledReceiptOcrCompletesOfflineOnAndroid7() throws Exception {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             AtomicReference<String> browserConsole = new AtomicReference<>("");
+            AtomicReference<String> missingNativeModel = new AtomicReference<>();
             scenario.onActivity(activity -> {
+                for (String code : new String[] { "fas", "eng", "tur" }) {
+                    String path = "offline-ocr/" + code + ".traineddata.gz";
+                    try (InputStream input = activity.getAssets().open(path)) {
+                        if (input.read() != 0x1f || input.read() != 0x8b) {
+                            missingNativeModel.compareAndSet(null, path + " is not a valid gzip asset");
+                        }
+                    } catch (IOException error) {
+                        missingNativeModel.compareAndSet(null, path + " is missing or unreadable: " + error);
+                    }
+                }
                 WebView webView = activity.getBridge().getWebView();
                 webView.setWebChromeClient(new WebChromeClient() {
                     @Override
@@ -36,6 +49,10 @@ public class OfflineOcrEmulatorTest {
                     }
                 });
             });
+            assertTrue(
+                "Native OCR model files were not packaged into the APK: " + missingNativeModel.get(),
+                missingNativeModel.get() == null
+            );
 
             long readyDeadline = SystemClock.elapsedRealtime() + APP_READY_TIMEOUT_MS;
             String body = "";
