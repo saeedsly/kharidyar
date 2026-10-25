@@ -1,0 +1,111 @@
+name: Test offline OCR on Android 7 emulator
+
+on:
+  push:
+    branches:
+      - arena/6332d18e-kharidyar
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  api24-ocr:
+    name: Run bundled receipt OCR on API 24
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Verify Android SDK
+        run: |
+          echo "Using Android SDK at $ANDROID_HOME"
+          test -d "$ANDROID_HOME/platforms/android-35"
+          test -x "$ANDROID_HOME/emulator/emulator"
+
+      - name: Build local OCR assets
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npx cap sync android
+
+      - name: Run OCR test in Android 7 emulator with network disabled
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 24
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          disable-animations: true
+          script: |
+            set +e
+            adb shell svc wifi disable >/dev/null 2>&1 || true
+            adb shell svc data disable >/dev/null 2>&1 || true
+            cd android
+            ./gradlew --no-daemon connectedDebugAndroidTest > ../emulator-test.log 2>&1
+            test_status=$?
+            cd ..
+            cat emulator-test.log
+            python3 - "$test_status" <<'PY'
+            import glob
+            import html
+            import sys
+            import xml.etree.ElementTree as ET
+
+            status = int(sys.argv[1])
+            paths = glob.glob('android/app/build/outputs/androidTest-results/connected/**/*.xml', recursive=True)
+            paths += glob.glob('android/app/build/test-results/**/*.xml', recursive=True)
+            failures = []
+            for path in paths:
+                try:
+                    root = ET.parse(path).getroot()
+                except Exception:
+                    continue
+                for case in root.iter('testcase'):
+                    failure = case.find('failure')
+                    if failure is None:
+                        failure = case.find('error')
+                    if failure is not None:
+                        detail = failure.get('message') or failure.text or 'Instrumentation test failed'
+                        failures.append(f"{case.get('name', 'OCR test')}: {detail}")
+
+            if status == 0:
+                message = 'PASS: bundled receipt OCR completed on Android 7 API 24 with Wi-Fi and mobile data disabled.'
+                print('::notice title=Android 7 offline OCR::' + message)
+                with open('emulator-summary.md', 'w', encoding='utf-8') as out:
+                    out.write('## Android 7 offline OCR emulator test\n\n' + message + '\n')
+            else:
+                message = ' | '.join(failures) if failures else 'Gradle or emulator failed before returning an OCR test result.'
+                message = html.escape(message[:5000]).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                print('::error title=Android 7 offline OCR::' + message)
+                with open('emulator-summary.md', 'w', encoding='utf-8') as out:
+                    out.write('## Android 7 offline OCR emulator test — FAILED\n\n' + message + '\n')
+            PY
+            exit "$test_status"
+
+      - name: Upload emulator test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KharidYar-Android7-OCR-test-report
+          path: |
+            emulator-test.log
+            emulator-summary.md
+            android/app/build/outputs/androidTest-results/connected/
+            android/app/build/reports/androidTests/connected/
+          if-no-files-found: ignore
+          retention-days: 14
