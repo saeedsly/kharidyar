@@ -894,7 +894,11 @@ export function ScannerModal({
                               <span className="block text-[10px] text-slate-400 mb-0.5">
                                 مبلغ کل ({resultCurrency})
                               </span>
-                              <div className="rounded-lg bg-white border border-slate-200 px-2.5 py-1 font-extrabold text-blue-700">
+                              <div
+                                data-testid="receipt-item-total"
+                                data-amount={it.total_price}
+                                className="rounded-lg bg-white border border-slate-200 px-2.5 py-1 font-extrabold text-blue-700"
+                              >
                                 {formatCurrency(it.total_price, resultCurrency, false)}
                               </div>
                             </div>
@@ -907,7 +911,13 @@ export function ScannerModal({
                   <div className="rounded-2xl bg-slate-50 p-3.5 space-y-2 text-xs tabular-fa border border-slate-200/60">
                     <div className="flex justify-between text-slate-600">
                       <span>جمع کل اقلام:</span>
-                      <span className="font-bold">{formatCurrency(liveSubtotal, resultCurrency)}</span>
+                      <span
+                        data-testid="receipt-subtotal"
+                        data-amount={liveSubtotal}
+                        className="font-bold"
+                      >
+                        {formatCurrency(liveSubtotal, resultCurrency)}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between text-emerald-700">
                       <span>تخفیف فاکتور ({resultCurrency}):</span>

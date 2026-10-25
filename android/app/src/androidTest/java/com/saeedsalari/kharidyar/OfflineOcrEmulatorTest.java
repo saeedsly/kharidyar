@@ -147,11 +147,25 @@ public class OfflineOcrEmulatorTest {
                     int parsedItemCount = Integer.parseInt(evaluate(scenario,
                         "String(document.querySelectorAll('[data-testid=\"receipt-item-name\"]').length)"
                     ));
+                    String parsedItemTotals = evaluate(scenario,
+                        "JSON.stringify(Array.from(document.querySelectorAll('[data-testid=\"receipt-item-total\"]')) " +
+                        ".map(element => element.getAttribute('data-amount')))"
+                    );
+                    String parsedSubtotal = evaluate(scenario,
+                        "document.querySelector('[data-testid=\"receipt-subtotal\"]')?.getAttribute('data-amount') || ''"
+                    );
                     String parsedDiscount = evaluate(scenario,
                         "document.querySelector('[data-testid=\"receipt-discount\"]')?.value || ''"
                     );
                     String parsedPayableTotal = evaluate(scenario,
                         "document.querySelector('[data-testid=\"receipt-payable-total\"]')?.getAttribute('data-amount') || ''"
+                    );
+                    String reviewDetails = evaluate(scenario,
+                        "JSON.stringify({discount: document.querySelector('[data-testid=\"receipt-discount\"]')?.outerHTML || null, " +
+                        "subtotal: document.querySelector('[data-testid=\"receipt-subtotal\"]')?.outerHTML || null, " +
+                        "payable: document.querySelector('[data-testid=\"receipt-payable-total\"]')?.outerHTML || null, " +
+                        "inputs: Array.from(document.querySelectorAll('input')).map(input => ({testId: input.getAttribute('data-testid'), value: input.value})), " +
+                        "summary: document.body.innerText.slice(-700)})"
                     );
                     assertTrue("OCR returned too little receipt text (" + rawOcrText.length() + " characters).", rawOcrText.length() >= 100);
                     assertTrue("OCR returned too few receipt lines (" + recognizedLines + "). Raw text: " + rawOcrText.substring(0, Math.min(400, rawOcrText.length())), recognizedLines >= 8);
@@ -160,8 +174,15 @@ public class OfflineOcrEmulatorTest {
                     assertTrue("OCR did not preserve the sample receipt subtotal.", rawOcrText.contains("443,000"));
                     assertTrue("OCR did not preserve the sample discount.", rawOcrText.contains("23,000"));
                     assertTrue("OCR did not preserve the sample payable amount.", rawOcrText.contains("420,000"));
-                    assertEquals("The discount was parsed incorrectly.", "23000", parsedDiscount);
-                    assertEquals("The payable total was parsed incorrectly.", "420000", parsedPayableTotal);
+                    assertEquals("The item prices were parsed incorrectly. OCR: " + rawOcrText,
+                        "[98000,65000,115000,42000,78000,45000]", parsedItemTotals);
+                    assertEquals("The subtotal was parsed incorrectly. OCR: " + rawOcrText,
+                        "443000", parsedSubtotal);
+                    assertEquals("The discount was parsed incorrectly. OCR: " + rawOcrText +
+                        " Parsed subtotal: " + parsedSubtotal + " item totals: " + parsedItemTotals +
+                        " Review state: " + reviewDetails, "23000", parsedDiscount);
+                    assertEquals("The payable total was parsed incorrectly. OCR: " + rawOcrText +
+                        " Review state: " + reviewDetails, "420000", parsedPayableTotal);
                     System.out.println("OFFLINE_OCR_EMULATOR_PASS: sample receipt produced " + rawOcrText.length() +
                         " OCR characters across " + recognizedLines + " lines and parsed " + parsedItemCount + " items. Names: " + itemNames +
                         ". Discount: " + parsedDiscount + ". Payable total: " + parsedPayableTotal);
