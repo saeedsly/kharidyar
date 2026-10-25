@@ -30,14 +30,20 @@ public class OfflineOcrEmulatorTest {
             AtomicReference<String> browserConsole = new AtomicReference<>("");
             AtomicReference<String> missingNativeModel = new AtomicReference<>();
             scenario.onActivity(activity -> {
-                for (String code : new String[] { "fas", "eng", "tur" }) {
-                    String path = "offline-ocr/" + code + ".traineddata.gz";
-                    try (InputStream input = activity.getAssets().open(path)) {
+                String[] languages = { "fas", "eng", "tur" };
+                int[] modelResources = {
+                    R.raw.fas_traineddata,
+                    R.raw.eng_traineddata,
+                    R.raw.tur_traineddata,
+                };
+                for (int index = 0; index < languages.length; index++) {
+                    String language = languages[index];
+                    try (InputStream input = activity.getResources().openRawResource(modelResources[index])) {
                         if (input.read() != 0x1f || input.read() != 0x8b) {
-                            missingNativeModel.compareAndSet(null, path + " is not a valid gzip asset");
+                            missingNativeModel.compareAndSet(null, language + " resource is not a valid gzip model");
                         }
-                    } catch (IOException error) {
-                        missingNativeModel.compareAndSet(null, path + " is missing or unreadable: " + error);
+                    } catch (IOException | RuntimeException error) {
+                        missingNativeModel.compareAndSet(null, language + " resource is missing or unreadable: " + error);
                     }
                 }
                 WebView webView = activity.getBridge().getWebView();

@@ -1,6 +1,5 @@
 package com.saeedsalari.kharidyar;
 
-import android.content.res.AssetManager;
 import android.util.Base64;
 import android.util.Log;
 import com.getcapacitor.JSObject;
@@ -15,11 +14,10 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Reads bundled OCR models through AssetManager, independently of WebView asset routing. */
+/** Reads bundled OCR models by Android resource ID, independently of WebView asset routing. */
 @CapacitorPlugin(name = "OfflineOcrAssets")
 public class OfflineOcrAssetsPlugin extends Plugin {
     private static final String TAG = "OfflineOcrAssets";
-    private static final String ASSET_DIRECTORY = "offline-ocr";
     private static final int MAX_CHUNK_BYTES = 192 * 1024;
     private final Map<String, byte[]> languageCache = new ConcurrentHashMap<>();
 
@@ -53,10 +51,10 @@ public class OfflineOcrAssetsPlugin extends Plugin {
             result.put("offset", offset);
             result.put("totalBytes", languageData.length);
             call.resolve(result);
-        } catch (IOException error) {
-            String message = "Could not read bundled " + code + " OCR model from APK assets ("
+        } catch (Exception error) {
+            String message = "Could not read bundled " + code + " OCR model resource from APK ("
                 + error.getClass().getSimpleName() + ": " + error.getMessage() + ").";
-            Log.e(TAG, message + " Available native model assets: " + listNativeAssets(), error);
+            Log.e(TAG, message, error);
             call.reject(message, error);
         }
     }
@@ -65,8 +63,8 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         byte[] cached = languageCache.get(code);
         if (cached != null) return cached;
 
-        String assetPath = ASSET_DIRECTORY + "/" + code + ".traineddata.gz";
-        try (InputStream input = getActivity().getAssets().open(assetPath, AssetManager.ACCESS_STREAMING);
+        int resourceId = getLanguageResourceId(code);
+        try (InputStream input = getActivity().getResources().openRawResource(resourceId);
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[64 * 1024];
             int bytesRead;
@@ -75,16 +73,21 @@ public class OfflineOcrAssetsPlugin extends Plugin {
             }
             byte[] loaded = output.toByteArray();
             languageCache.put(code, loaded);
-            Log.i(TAG, "Loaded " + assetPath + " (" + loaded.length + " bytes)");
+            Log.i(TAG, "Loaded bundled " + code + " OCR resource (" + loaded.length + " bytes)");
             return loaded;
         }
     }
 
-    private String listNativeAssets() {
-        try {
-            return Arrays.toString(getActivity().getAssets().list(ASSET_DIRECTORY));
-        } catch (IOException error) {
-            return "<could not list " + ASSET_DIRECTORY + ": " + error.getMessage() + ">";
+    private int getLanguageResourceId(String code) {
+        switch (code) {
+            case "fas":
+                return R.raw.fas_traineddata;
+            case "eng":
+                return R.raw.eng_traineddata;
+            case "tur":
+                return R.raw.tur_traineddata;
+            default:
+                throw new IllegalArgumentException("Unsupported offline OCR language: " + code);
         }
     }
 }

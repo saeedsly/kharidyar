@@ -12,7 +12,7 @@ android/.gradle/
 android/app/build/
 android/build/
 android/app/src/main/assets/public/
-android/app/src/main/assets/offline-ocr/
+android/app/src/main/res/raw/
 public/downloads/
 KharidYar-v1.0.apk
 *.jks
