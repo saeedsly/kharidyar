@@ -1,6 +1,8 @@
 package com.saeedsalari.kharidyar;
 
 import android.os.SystemClock;
+import android.webkit.ConsoleMessage;
+import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -23,6 +25,15 @@ public class OfflineOcrEmulatorTest {
     @Test
     public void bundledReceiptOcrCompletesOfflineOnAndroid7() throws Exception {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            AtomicReference<String> browserConsole = new AtomicReference<>("");
+            scenario.onActivity(activity -> activity.getBridge().getWebView().setWebChromeClient(new WebChromeClient() {
+                @Override
+                public boolean onConsoleMessage(ConsoleMessage message) {
+                    browserConsole.accumulateAndGet(message.message() + "\n", (oldValue, nextValue) -> oldValue + nextValue);
+                    return true;
+                }
+            }));
+
             long readyDeadline = SystemClock.elapsedRealtime() + APP_READY_TIMEOUT_MS;
             String body = "";
             while (SystemClock.elapsedRealtime() < readyDeadline) {
@@ -30,7 +41,16 @@ public class OfflineOcrEmulatorTest {
                 if (body.contains("تست زنده اسکنر هوشمند")) break;
                 SystemClock.sleep(500);
             }
-            assertTrue("The app UI did not load in the emulator. Body: " + body, body.contains("تست زنده اسکنر هوشمند"));
+            String pageState = evaluate(scenario,
+                "JSON.stringify({href: location.href, readyState: document.readyState, title: document.title, " +
+                "body: document.body ? document.body.innerHTML.substring(0, 1000) : 'no body', " +
+                "text: document.body ? document.body.innerText : ''})"
+            );
+            assertTrue(
+                "The app UI did not load in the emulator. Native URL: " + getNativeUrl(scenario) +
+                " Page state: " + pageState + " Console: " + browserConsole.get(),
+                body.contains("تست زنده اسکنر هوشمند")
+            );
 
             evaluate(scenario,
                 "(() => { window.__emulatorOcrErrors = []; " +
@@ -71,6 +91,15 @@ public class OfflineOcrEmulatorTest {
             }
             fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR did not reach review within 75 seconds. Last UI: " + lastBody + " Errors: " + getPageErrors(scenario));
         }
+    }
+
+    private static String getNativeUrl(ActivityScenario<MainActivity> scenario) {
+        AtomicReference<String> url = new AtomicReference<>("<unavailable>");
+        scenario.onActivity(activity -> {
+            WebView webView = activity.getBridge().getWebView();
+            if (webView != null) url.set(String.valueOf(webView.getUrl()));
+        });
+        return url.get();
     }
 
     private static String getPageErrors(ActivityScenario<MainActivity> scenario) throws Exception {
