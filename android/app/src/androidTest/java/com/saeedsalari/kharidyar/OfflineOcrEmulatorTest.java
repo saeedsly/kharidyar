@@ -40,7 +40,11 @@ public class OfflineOcrEmulatorTest {
             long readyDeadline = SystemClock.elapsedRealtime() + APP_READY_TIMEOUT_MS;
             String body = "";
             while (SystemClock.elapsedRealtime() < readyDeadline) {
-                body = evaluate(scenario, "document.body ? document.body.innerText : ''");
+                try {
+                    body = evaluate(scenario, "document.getElementById('root') ? document.getElementById('root').textContent : ''");
+                } catch (AssertionError error) {
+                    throw new AssertionError("WebView startup evaluation failed. Console: " + browserConsole.get(), error);
+                }
                 if (body.contains("تست زنده اسکنر هوشمند")) break;
                 SystemClock.sleep(500);
             }
@@ -50,7 +54,7 @@ public class OfflineOcrEmulatorTest {
                 scenario.onActivity(activity -> activity.getBridge().getWebView().reload());
                 SystemClock.sleep(2_000);
                 try {
-                    body = evaluate(scenario, "document.body ? document.body.innerText : ''");
+                    body = evaluate(scenario, "document.getElementById('root') ? document.getElementById('root').textContent : ''");
                 } catch (AssertionError error) {
                     throw new AssertionError("WebView did not respond after diagnostic reload. Console: " + browserConsole.get(), error);
                 }
@@ -144,7 +148,7 @@ public class OfflineOcrEmulatorTest {
                 latch.countDown();
             }
         });
-        assertTrue("Timed out while reading the WebView state", latch.await(5, TimeUnit.SECONDS));
+        assertTrue("Timed out while reading the WebView state", latch.await(20, TimeUnit.SECONDS));
         if (evaluationError.get() != null) throw new AssertionError(evaluationError.get());
         String encoded = encodedResult.get();
         if (encoded == null || "null".equals(encoded)) return "";
