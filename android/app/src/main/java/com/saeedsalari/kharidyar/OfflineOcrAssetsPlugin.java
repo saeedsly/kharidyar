@@ -357,22 +357,137 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         return dataRoot.getAbsolutePath();
     }
 
-    private JSArray extractTextLines(TessBaseAPI api) {
-        JSArray lines = new JSArray();
-        ResultIterator iterator = api.getResultIterator();
-        if (iterator == null) return lines;
+    private static final class OcrWord {
+        final String text;
+        final int confidence;
+        final Rect bounds;
+        final int sequence;
 
-        int level = TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE;
+        OcrWord(String text, int confidence, Rect bounds, int sequence) {
+            this.text = text;
+            this.confidence = confidence;
+            this.bounds = bounds;
+            this.sequence = sequence;
+        }
+    }
+
+    private static final class OcrTextLine {
+        final java.util.List<OcrWord> words = new java.util.ArrayList<>();
+        int top = Integer.MAX_VALUE;
+        int left = Integer.MAX_VALUE;
+        int bottom = Integer.MIN_VALUE;
+        int right = Integer.MIN_VALUE;
+        int baseline;
+        int confidenceTotal;
+
+        void add(OcrWord word) {
+            int oldCount = words.size();
+            words.add(word);
+            top = Math.min(top, word.bounds.top);
+            left = Math.min(left, word.bounds.left);
+            bottom = Math.max(bottom, word.bounds.bottom);
+            right = Math.max(right, word.bounds.right);
+            baseline = oldCount == 0
+                ? word.bounds.bottom
+                : Math.round((baseline * oldCount + word.bounds.bottom) / (float) (oldCount + 1));
+            confidenceTotal += word.confidence;
+        }
+
+        int verticalTolerance(OcrWord word) {
+            int rowHeight = Math.max(bottom - top, word.bounds.height());
+            return Math.max(5, Math.min(18, Math.round(rowHeight * 0.55f)));
+        }
+
+        String text() {
+            java.util.Collections.sort(words, (first, second) -> Integer.compare(first.sequence, second.sequence));
+            StringBuilder text = new StringBuilder();
+            for (OcrWord word : words) {
+                if (text.length() > 0) text.append(' ');
+                text.append(word.text);
+            }
+            return text.toString().trim();
+        }
+
+        JSObject toJson() {
+            JSObject line = new JSObject();
+            line.put("text", text());
+            line.put("confidence", words.isEmpty() ? 0 : Math.round(confidenceTotal / (float) words.size()));
+
+            JSObject box = new JSObject();
+            box.put("x0", left);
+            box.put("y0", top);
+            box.put("x1", right);
+            box.put("y1", bottom);
+            line.put("bbox", box);
+            return line;
+        }
+    }
+
+    private JSArray extractTextLines(TessBaseAPI api) {
+        JSArray wordLines = new JSArray();
+        ResultIterator iterator = api.getResultIterator();
+        if (iterator != null) {
+            java.util.List<OcrWord> words = new java.util.ArrayList<>();
+            int level = TessBaseAPI.PageIteratorLevel.RIL_WORD;
+            try {
+                iterator.begin();
+                int sequence = 0;
+                do {
+                    String text = iterator.getUTF8Text(level);
+                    if (text == null || text.trim().isEmpty()) continue;
+                    Rect bounds = iterator.getBoundingRect(level);
+                    if (bounds == null || bounds.isEmpty()) continue;
+                    words.add(new OcrWord(text.trim(), Math.round(iterator.confidence(level)), bounds, sequence++));
+                } while (iterator.next(level));
+            } finally {
+                iterator.delete();
+            }
+
+            java.util.Collections.sort(words, (first, second) -> {
+                int verticalOrder = Integer.compare(first.bounds.bottom, second.bounds.bottom);
+                return verticalOrder != 0 ? verticalOrder : Integer.compare(first.sequence, second.sequence);
+            });
+
+            java.util.List<OcrTextLine> groupedLines = new java.util.ArrayList<>();
+            for (OcrWord word : words) {
+                OcrTextLine match = null;
+                for (int index = groupedLines.size() - 1; index >= 0; index--) {
+                    OcrTextLine candidate = groupedLines.get(index);
+                    if (Math.abs(candidate.baseline - word.bounds.bottom) <= candidate.verticalTolerance(word)) {
+                        match = candidate;
+                        break;
+                    }
+                    if (candidate.baseline < word.bounds.bottom - 24) break;
+                }
+                if (match == null) {
+                    match = new OcrTextLine();
+                    groupedLines.add(match);
+                }
+                match.add(word);
+            }
+
+            for (OcrTextLine groupedLine : groupedLines) {
+                if (!groupedLine.words.isEmpty() && !groupedLine.text().isEmpty()) wordLines.put(groupedLine.toJson());
+            }
+        }
+        if (wordLines.length() > 1) return wordLines;
+
+        // Keep Tesseract's own text-line layout as a fallback for images with no usable word boxes.
+        JSArray textLines = new JSArray();
+        ResultIterator textIterator = api.getResultIterator();
+        if (textIterator == null) return wordLines;
+        int textLevel = TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE;
         try {
-            iterator.begin();
+            textIterator.begin();
             do {
-                String text = iterator.getUTF8Text(level);
+                String text = textIterator.getUTF8Text(textLevel);
                 if (text == null || text.trim().isEmpty()) continue;
 
-                Rect bounds = iterator.getBoundingRect(level);
+                Rect bounds = textIterator.getBoundingRect(textLevel);
+                if (bounds == null || bounds.isEmpty()) continue;
                 JSObject line = new JSObject();
                 line.put("text", text.trim());
-                line.put("confidence", Math.round(iterator.confidence(level)));
+                line.put("confidence", Math.round(textIterator.confidence(textLevel)));
 
                 JSObject box = new JSObject();
                 box.put("x0", bounds.left);
@@ -380,12 +495,12 @@ public class OfflineOcrAssetsPlugin extends Plugin {
                 box.put("x1", bounds.right);
                 box.put("y1", bounds.bottom);
                 line.put("bbox", box);
-                lines.put(line);
-            } while (iterator.next(level));
+                textLines.put(line);
+            } while (textIterator.next(textLevel));
         } finally {
-            iterator.delete();
+            textIterator.delete();
         }
-        return lines;
+        return textLines.length() > wordLines.length() ? textLines : wordLines;
     }
 
     private int getLanguageResourceId(String code) {
