@@ -62,7 +62,11 @@ jobs:
           script: |
             adb shell svc wifi disable >/dev/null 2>&1 || true
             adb shell svc data disable >/dev/null 2>&1 || true
-            ./gradlew --no-daemon connectedDebugAndroidTest
+            set +e
+            ./gradlew --no-daemon connectedDebugAndroidTest 2>&1 | tee ../emulator-test.log
+            test_status=${PIPESTATUS[0]}
+            adb logcat -d -v threadtime '*:E' OfflineOcrAssets:V AndroidRuntime:E > ../emulator-logcat.txt || true
+            exit "$test_status"
 
       - name: Summarize emulator OCR result
         if: always()
@@ -97,7 +101,21 @@ jobs:
               print('::notice title=Android 7 offline OCR::' + message)
               summary = '## Android 7 offline OCR emulator test\n\n' + message + '\n'
           else:
-              message = ' | '.join(failures) if failures else f'Emulator test outcome: {outcome}. No JUnit failure details were produced.'
+              if failures:
+                  message = ' | '.join(failures)
+              else:
+                  log_tail = ''
+                  if os.path.isfile('emulator-test.log'):
+                      with open('emulator-test.log', encoding='utf-8', errors='replace') as log_file:
+                          log_tail = '\n'.join(log_file.read().splitlines()[-50:])
+                  message = f'Emulator test outcome: {outcome}. No JUnit failure details were produced.'
+                  if log_tail:
+                      message += f' Gradle output: {log_tail}'
+                  if os.path.isfile('emulator-logcat.txt'):
+                      with open('emulator-logcat.txt', encoding='utf-8', errors='replace') as log_file:
+                          logcat_tail = '\n'.join(log_file.read().splitlines()[-30:])
+                      if logcat_tail:
+                          message += f' Android logcat: {logcat_tail}'
               message = html.escape(message[:5000]).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
               print('::error title=Android 7 offline OCR::' + message)
               summary = '## Android 7 offline OCR emulator test — FAILED\n\n' + message + '\n'
@@ -114,6 +132,7 @@ jobs:
           name: KharidYar-Android7-OCR-test-report
           path: |
             emulator-test.log
+            emulator-logcat.txt
             emulator-summary.md
             android/app/build/outputs/androidTest-results/connected/
             android/app/build/reports/androidTests/connected/
