@@ -26,13 +26,19 @@ public class OfflineOcrEmulatorTest {
     public void bundledReceiptOcrCompletesOfflineOnAndroid7() throws Exception {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             AtomicReference<String> browserConsole = new AtomicReference<>("");
-            scenario.onActivity(activity -> activity.getBridge().getWebView().setWebChromeClient(new WebChromeClient() {
-                @Override
-                public boolean onConsoleMessage(ConsoleMessage message) {
-                    browserConsole.accumulateAndGet(message.message() + "\n", (oldValue, nextValue) -> oldValue + nextValue);
-                    return true;
-                }
-            }));
+            scenario.onActivity(activity -> {
+                WebView webView = activity.getBridge().getWebView();
+                webView.setWebChromeClient(new WebChromeClient() {
+                    @Override
+                    public boolean onConsoleMessage(ConsoleMessage message) {
+                        browserConsole.accumulateAndGet(message.message() + "\n", (oldValue, nextValue) -> oldValue + nextValue);
+                        return true;
+                    }
+                });
+                // Capture startup JavaScript/module errors as well; ActivityScenario launches before
+                // the test can attach its console listener, so reload once with diagnostics enabled.
+                webView.reload();
+            });
 
             long readyDeadline = SystemClock.elapsedRealtime() + APP_READY_TIMEOUT_MS;
             String body = "";
@@ -44,7 +50,8 @@ public class OfflineOcrEmulatorTest {
             String pageState = evaluate(scenario,
                 "JSON.stringify({href: location.href, readyState: document.readyState, title: document.title, " +
                 "body: document.body ? document.body.innerHTML.substring(0, 1000) : 'no body', " +
-                "text: document.body ? document.body.innerText : ''})"
+                "text: document.body ? document.body.innerText : '', userAgent: navigator.userAgent, " +
+                "moduleScriptsSupported: 'noModule' in HTMLScriptElement.prototype})"
             );
             assertTrue(
                 "The app UI did not load in the emulator. Native URL: " + getNativeUrl(scenario) +
