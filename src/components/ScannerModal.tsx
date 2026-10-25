@@ -283,7 +283,7 @@ export function ScannerModal({
       if (err?.message === 'SCAN_CANCELLED') {
         setErrorMsg(null);
       } else if (err?.message === 'SCAN_TIMEOUT') {
-        setErrorMsg('پردازش این عکس در یک دقیقه تمام نشد. عکس فشرده و روی گوشی می‌ماند؛ می‌توانی دوباره تلاش کنی یا آن را در گالری برش بدهی.');
+        setErrorMsg('خواندن فاکتور در زمان مجاز تمام نشد. عکس فشرده و روی گوشی می‌ماند؛ می‌توانی دوباره تلاش کنی یا آن را در گالری برش بدهی.');
       } else {
         setErrorMsg(err?.message || 'خواندن فاکتور ناموفق بود. عکس را روشن‌تر یا صاف‌تر بگیر و دوباره تلاش کن.');
       }

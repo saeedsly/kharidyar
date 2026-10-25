@@ -16,6 +16,7 @@ const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
 };
 const MAX_RECEIPT_EDGE = 1500;
 const MAX_SCAN_TIME_MS = 60_000;
+const MAX_NATIVE_SCAN_TIME_MS = 180_000;
 const WORKER_IDLE_MS = 60_000;
 const WASM_BASELINE_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
 const WASM_SIMD_PROBE = new Uint8Array([
@@ -337,6 +338,8 @@ export async function runOnDeviceAutonomousScan(
   onProgress?: (stage: string, pct: number) => void
 ): Promise<ScanResponse> {
   const startedAt = Date.now();
+  const isNativeAndroid = Capacitor.getPlatform() === 'android';
+  const scanTimeoutMs = isNativeAndroid ? MAX_NATIVE_SCAN_TIME_MS : MAX_SCAN_TIME_MS;
   let cancelled = false;
   let rejectCancellation: ((error: Error) => void) | null = null;
   const cancelledPromise = new Promise<never>((_, reject) => {
@@ -347,7 +350,7 @@ export async function runOnDeviceAutonomousScan(
     cancelled = true;
     rejectCancellation?.(new Error('SCAN_CANCELLED'));
     disposeWorker();
-    if (Capacitor.getPlatform() === 'android') {
+    if (isNativeAndroid) {
       void OfflineOcrAssets.cancelRecognition().catch(() => {});
     }
   };
@@ -357,7 +360,7 @@ export async function runOnDeviceAutonomousScan(
     let lineBoxes: BoundingBox[];
     let confidence: number;
 
-    if (Capacitor.getPlatform() === 'android') {
+    if (isNativeAndroid) {
       progress('بارگذاری موتور بومی OCR و مدل‌های آفلاین...', 22);
       const nativeProgressListener = await OfflineOcrAssets.addListener('ocrProgress', (update) => {
         const nativePercent = Math.max(0, Math.min(100, Number(update.percent) || 0));
@@ -366,7 +369,7 @@ export async function runOnDeviceAutonomousScan(
       try {
         const imageBase64 = await blobToBase64(compressedFile);
         if (cancelled) throw new Error('SCAN_CANCELLED');
-        const remainingMs = MAX_SCAN_TIME_MS - (Date.now() - startedAt);
+        const remainingMs = scanTimeoutMs - (Date.now() - startedAt);
         if (remainingMs <= 0) throw new Error('SCAN_TIMEOUT');
 
         const nativeRecognition = OfflineOcrAssets.recognizeReceipt({
@@ -412,11 +415,11 @@ export async function runOnDeviceAutonomousScan(
     } else {
       progress('در حال آماده‌سازی موتور OCR آفلاین...', 21);
       const worker = await Promise.race([
-        getOcrWorker(language, MAX_SCAN_TIME_MS, onProgress),
+        getOcrWorker(language, scanTimeoutMs, onProgress),
         cancelledPromise,
       ]);
 
-      const remainingMs = MAX_SCAN_TIME_MS - (Date.now() - startedAt);
+      const remainingMs = scanTimeoutMs - (Date.now() - startedAt);
       if (remainingMs <= 0) {
         disposeWorker();
         throw new Error('SCAN_TIMEOUT');

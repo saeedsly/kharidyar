@@ -22,7 +22,7 @@ import static org.junit.Assert.fail;
 @RunWith(AndroidJUnit4.class)
 public class OfflineOcrEmulatorTest {
     private static final long APP_READY_TIMEOUT_MS = 30_000;
-    private static final long OCR_TIMEOUT_MS = 75_000;
+    private static final long OCR_TIMEOUT_MS = 195_000;
 
     @Test
     public void bundledReceiptOcrCompletesOfflineOnAndroid7() throws Exception {
@@ -128,8 +128,8 @@ public class OfflineOcrEmulatorTest {
                     System.out.println("OFFLINE_OCR_EMULATOR_PASS: built-in Ofogh receipt completed and produced OCR text.");
                     return;
                 }
-                if (lastBody.contains("پردازش این عکس در یک دقیقه تمام نشد")) {
-                    fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR reached the app's one-minute timeout. Last progress: " + lastOcrProgress + " UI: " + lastBody + " Errors: " + getPageErrors(scenario) + " Console: " + browserConsole.get());
+                if (lastBody.contains("خواندن فاکتور در زمان مجاز تمام نشد")) {
+                    fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR reached the app's native scan timeout. Last progress: " + lastOcrProgress + " UI: " + lastBody + " Errors: " + getPageErrors(scenario) + " Console: " + browserConsole.get());
                 }
                 if (lastBody.contains("خواندن فاکتور ناموفق بود") || lastBody.contains("قابل خواندن نیست")) {
                     fail("OFFLINE_OCR_EMULATOR_ERROR: scan failed before review. Last progress: " + lastOcrProgress + " UI: " + lastBody + " Errors: " + getPageErrors(scenario));
