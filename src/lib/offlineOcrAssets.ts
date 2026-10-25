@@ -1,19 +1,34 @@
-import { registerPlugin } from '@capacitor/core';
+import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
-export type OfflineOcrLanguageCode = 'fas' | 'eng' | 'tur';
+export interface NativeOcrLine {
+  text: string;
+  confidence: number;
+  bbox: { x0: number; y0: number; x1: number; y1: number };
+}
 
-interface OfflineOcrAssetChunk {
-  data: string;
-  offset: number;
-  totalBytes: number;
+export interface NativeOcrResult {
+  text: string;
+  confidence: number;
+  lines: NativeOcrLine[];
+}
+
+export interface NativeOcrProgress {
+  stage: string;
+  percent: number;
 }
 
 interface OfflineOcrAssetsPlugin {
-  readLanguageChunk(options: {
-    code: OfflineOcrLanguageCode;
-    offset: number;
-    length: number;
-  }): Promise<OfflineOcrAssetChunk>;
+  recognizeReceipt(options: {
+    imageBase64: string;
+    language: string;
+    width: number;
+    height: number;
+  }): Promise<NativeOcrResult>;
+  cancelRecognition(): Promise<void>;
+  addListener(
+    eventName: 'ocrProgress',
+    listenerFunc: (progress: NativeOcrProgress) => void
+  ): Promise<PluginListenerHandle>;
 }
 
 export const OfflineOcrAssets = registerPlugin<OfflineOcrAssetsPlugin>('OfflineOcrAssets');

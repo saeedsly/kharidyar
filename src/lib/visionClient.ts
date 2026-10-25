@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { createWorker } from 'tesseract.js';
 import type { BoundingBox, ScanResponse, ShoppingItem } from '../types';
 import { assetUrl } from './assetUrl';
-import { OfflineOcrAssets, type OfflineOcrLanguageCode } from './offlineOcrAssets';
+import { OfflineOcrAssets, type NativeOcrResult } from './offlineOcrAssets';
 import {
   parsePersianReceiptText,
   reconcileReceiptWithShoppingList,
@@ -49,81 +49,6 @@ function getOcrCorePath(): string {
     if (debugWindow.__emulatorOcrDebug) debugWindow.__emulatorOcrCorePath = corePath;
   }
   return corePath;
-}
-
-const NATIVE_OCR_CHUNK_BYTES = 192 * 1024;
-const nativeOcrLanguageCache = new Map<OfflineOcrLanguageCode, Promise<Uint8Array>>();
-
-function decodeBase64Bytes(encoded: string): Uint8Array {
-  const binary = atob(encoded);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
-
-function asOfflineOcrLanguageCode(code: string): OfflineOcrLanguageCode {
-  if (code === 'fas' || code === 'eng' || code === 'tur') return code;
-  throw new Error(`Unsupported offline OCR language: ${code}`);
-}
-
-function loadNativeOcrLanguage(code: OfflineOcrLanguageCode): Promise<Uint8Array> {
-  const existing = nativeOcrLanguageCache.get(code);
-  if (existing) return existing;
-
-  const pending = (async () => {
-    const chunks: Uint8Array[] = [];
-    let totalBytes = -1;
-    let offset = 0;
-
-    while (totalBytes < 0 || offset < totalBytes) {
-      const result = await OfflineOcrAssets.readLanguageChunk({
-        code,
-        offset,
-        length: NATIVE_OCR_CHUNK_BYTES,
-      });
-      if (!Number.isInteger(result.totalBytes) || result.totalBytes < 1 || result.totalBytes > 20 * 1024 * 1024) {
-        throw new Error(`Invalid bundled OCR model size for ${code}.`);
-      }
-      if (totalBytes >= 0 && totalBytes !== result.totalBytes) {
-        throw new Error(`Bundled OCR model size changed while reading ${code}.`);
-      }
-      totalBytes = result.totalBytes;
-      if (result.offset !== offset) throw new Error(`Bundled OCR model chunk was out of order for ${code}.`);
-
-      const chunk = decodeBase64Bytes(result.data);
-      if (chunk.length === 0 && offset < totalBytes) {
-        throw new Error(`Bundled OCR model ended early for ${code}.`);
-      }
-      chunks.push(chunk);
-      offset += chunk.length;
-    }
-
-    if (offset !== totalBytes) throw new Error(`Bundled OCR model length mismatch for ${code}.`);
-    const complete = new Uint8Array(totalBytes);
-    let writeOffset = 0;
-    for (const chunk of chunks) {
-      complete.set(chunk, writeOffset);
-      writeOffset += chunk.length;
-    }
-    return complete;
-  })();
-
-  nativeOcrLanguageCache.set(code, pending);
-  void pending.catch(() => {
-    if (nativeOcrLanguageCache.get(code) === pending) nativeOcrLanguageCache.delete(code);
-  });
-  return pending;
-}
-
-async function loadNativeOcrLanguages(languageCode: string) {
-  const codes = languageCode.split('+').map(asOfflineOcrLanguageCode);
-  progress('خواندن زبان‌های آفلاین از فایل برنامه...', 25);
-  const models = await Promise.all(codes.map(async (code) => ({
-    code,
-    data: await loadNativeOcrLanguage(code),
-  })));
-  progress('مدل‌های آفلاین آمادهٔ پردازش هستند...', 27);
-  return models;
 }
 
 type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
@@ -247,13 +172,7 @@ async function getOcrWorker(
       },
     };
     const workerOptions = createWorkerOptions as Parameters<typeof createWorker>[2];
-    const created = (async () => {
-      if (Capacitor.getPlatform() === 'android') {
-        const models = await loadNativeOcrLanguages(languageCode);
-        return createWorker(models, 1, workerOptions);
-      }
-      return createWorker(languageCode, 1, workerOptions);
-    })();
+    const created = createWorker(languageCode, 1, workerOptions);
 
     let trackedPromise: Promise<OcrWorker>;
     trackedPromise = created.then(
@@ -366,6 +285,27 @@ export async function normalizeAndCompressReceiptPhoto(
   }
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('IMAGE_ENCODING_FAILED'));
+        return;
+      }
+      const comma = result.indexOf(',');
+      if (comma < 0) {
+        reject(new Error('IMAGE_ENCODING_FAILED'));
+        return;
+      }
+      resolve(result.slice(comma + 1));
+    };
+    reader.onerror = () => reject(new Error('IMAGE_ENCODING_FAILED'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 interface OcrLineData {
   text: string;
   confidence: number;
@@ -407,42 +347,102 @@ export async function runOnDeviceAutonomousScan(
     cancelled = true;
     rejectCancellation?.(new Error('SCAN_CANCELLED'));
     disposeWorker();
+    if (Capacitor.getPlatform() === 'android') {
+      void OfflineOcrAssets.cancelRecognition().catch(() => {});
+    }
   };
 
   try {
-    progress('در حال آماده‌سازی موتور آفلاین...', 21);
-    const worker = await Promise.race([
-      getOcrWorker(language, MAX_SCAN_TIME_MS, onProgress),
-      cancelledPromise,
-    ]);
+    let rawLines: string[];
+    let lineBoxes: BoundingBox[];
+    let confidence: number;
 
-    const elapsed = Date.now() - startedAt;
-    const remainingMs = MAX_SCAN_TIME_MS - elapsed;
-    if (remainingMs <= 0) {
-      disposeWorker();
-      throw new Error('SCAN_TIMEOUT');
+    if (Capacitor.getPlatform() === 'android') {
+      progress('بارگذاری موتور بومی OCR و مدل‌های آفلاین...', 22);
+      const nativeProgressListener = await OfflineOcrAssets.addListener('ocrProgress', (update) => {
+        const nativePercent = Math.max(0, Math.min(100, Number(update.percent) || 0));
+        progress(update.stage || 'در حال خواندن فاکتور روی گوشی...', 28 + nativePercent * 0.62);
+      });
+      try {
+        const imageBase64 = await blobToBase64(compressedFile);
+        if (cancelled) throw new Error('SCAN_CANCELLED');
+        const remainingMs = MAX_SCAN_TIME_MS - (Date.now() - startedAt);
+        if (remainingMs <= 0) throw new Error('SCAN_TIMEOUT');
+
+        const nativeRecognition = OfflineOcrAssets.recognizeReceipt({
+          imageBase64,
+          language: OCR_LANGUAGES[language],
+          width,
+          height,
+        });
+        const recognized: NativeOcrResult = await Promise.race([
+          withTimeout(nativeRecognition, remainingMs, () => {
+            void OfflineOcrAssets.cancelRecognition().catch(() => {});
+          }),
+          cancelledPromise,
+        ]);
+        const nativeLines = Array.isArray(recognized.lines)
+          ? recognized.lines.filter((line) => line.text?.trim())
+          : [];
+        if (nativeLines.length > 0) {
+          rawLines = nativeLines.map((line) => line.text.trim());
+          lineBoxes = nativeLines.map((line) => ({
+            x: Number((line.bbox.x0 / width).toFixed(4)),
+            y: Number((line.bbox.y0 / height).toFixed(4)),
+            w: Number(((line.bbox.x1 - line.bbox.x0) / width).toFixed(4)),
+            h: Number(((line.bbox.y1 - line.bbox.y0) / height).toFixed(4)),
+            text: line.text.trim(),
+            confidence: Math.round(line.confidence || 0),
+          }));
+        } else {
+          rawLines = (recognized.text || '').split(/\r?\n/).map((text) => text.trim()).filter(Boolean);
+          lineBoxes = rawLines.map((text) => ({
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 0,
+            text,
+            confidence: Math.round(recognized.confidence || 0),
+          }));
+        }
+        confidence = Number(recognized.confidence || 75);
+      } finally {
+        await nativeProgressListener.remove();
+      }
+    } else {
+      progress('در حال آماده‌سازی موتور OCR آفلاین...', 21);
+      const worker = await Promise.race([
+        getOcrWorker(language, MAX_SCAN_TIME_MS, onProgress),
+        cancelledPromise,
+      ]);
+
+      const remainingMs = MAX_SCAN_TIME_MS - (Date.now() - startedAt);
+      if (remainingMs <= 0) {
+        disposeWorker();
+        throw new Error('SCAN_TIMEOUT');
+      }
+
+      progress('در حال خواندن فاکتور...', 36);
+      const recognition = worker.recognize(compressedFile, {}, { blocks: true });
+      const recognized = await Promise.race([
+        withTimeout(recognition, remainingMs, () => disposeWorker()),
+        cancelledPromise,
+      ]);
+
+      const ocrLines = flattenOcrLines(recognized.data).filter((line) => line.text.trim());
+      rawLines = ocrLines.map((line) => line.text.trim());
+      lineBoxes = ocrLines.map((line) => ({
+        x: Number((line.bbox.x0 / width).toFixed(4)),
+        y: Number((line.bbox.y0 / height).toFixed(4)),
+        w: Number(((line.bbox.x1 - line.bbox.x0) / width).toFixed(4)),
+        h: Number(((line.bbox.y1 - line.bbox.y0) / height).toFixed(4)),
+        text: line.text?.trim() || '',
+        confidence: Math.round(line.confidence || 0),
+      }));
+      confidence = Number(recognized.data.confidence || 75);
     }
 
-    progress('در حال خواندن فاکتور...', 36);
-    const recognition = worker.recognize(compressedFile, {}, { blocks: true });
-    const recognized = await Promise.race([
-      withTimeout(recognition, remainingMs, () => disposeWorker()),
-      cancelledPromise,
-    ]);
-
-    const ocrLines = flattenOcrLines(recognized.data).filter((line) => line.text.trim());
-    const rawLines = ocrLines.map((line) => line.text.trim());
-    const lineBoxes: BoundingBox[] = ocrLines.map((line) => ({
-      x: Number((line.bbox.x0 / width).toFixed(4)),
-      y: Number((line.bbox.y0 / height).toFixed(4)),
-      w: Number(((line.bbox.x1 - line.bbox.x0) / width).toFixed(4)),
-      h: Number(((line.bbox.y1 - line.bbox.y0) / height).toFixed(4)),
-      text: line.text?.trim() || '',
-      confidence: Math.round(line.confidence || 0),
-    }));
-
     progress('تطبیق اقلام با چک‌لیست خرید...', 96);
-    const confidence = Number(recognized.data.confidence || 75);
     const parsed = parsePersianReceiptText(rawLines, lineBoxes, confidence);
     const reconciliation = reconcileReceiptWithShoppingList(parsed.items, shoppingItems);
     progress('فاکتور آمادهٔ بازبینی است.', 100);
