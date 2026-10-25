@@ -5,13 +5,13 @@ import android.app.Instrumentation;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.SystemClock;
-import android.view.KeyEvent;
 import android.webkit.ConsoleMessage;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.uiautomator.UiDevice;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.concurrent.CountDownLatch;
@@ -219,7 +219,7 @@ public class OfflineOcrEmulatorTest {
             System.out.println("OFFLINE_OCR_FILE_PICKER_PASS: ACTION_OPEN_DOCUMENT opened " + pickerPackage + ".");
         } finally {
             if (pickerWasRequested || pickerActivity != null) {
-                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+                UiDevice.getInstance(instrumentation).pressBack();
             }
             instrumentation.removeMonitor(pickerMonitor);
         }
