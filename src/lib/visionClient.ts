@@ -1,6 +1,8 @@
+import { Capacitor } from '@capacitor/core';
 import { createWorker } from 'tesseract.js';
 import type { BoundingBox, ScanResponse, ShoppingItem } from '../types';
 import { assetUrl } from './assetUrl';
+import { OfflineOcrAssets, type OfflineOcrLanguageCode } from './offlineOcrAssets';
 import {
   parsePersianReceiptText,
   reconcileReceiptWithShoppingList,
@@ -55,6 +57,81 @@ function getOcrCorePath(): string {
     if (debugWindow.__emulatorOcrDebug) debugWindow.__emulatorOcrCorePath = corePath;
   }
   return corePath;
+}
+
+const NATIVE_OCR_CHUNK_BYTES = 192 * 1024;
+const nativeOcrLanguageCache = new Map<OfflineOcrLanguageCode, Promise<Uint8Array>>();
+
+function decodeBase64Bytes(encoded: string): Uint8Array {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function asOfflineOcrLanguageCode(code: string): OfflineOcrLanguageCode {
+  if (code === 'fas' || code === 'eng' || code === 'tur') return code;
+  throw new Error(`Unsupported offline OCR language: ${code}`);
+}
+
+function loadNativeOcrLanguage(code: OfflineOcrLanguageCode): Promise<Uint8Array> {
+  const existing = nativeOcrLanguageCache.get(code);
+  if (existing) return existing;
+
+  const pending = (async () => {
+    const chunks: Uint8Array[] = [];
+    let totalBytes = -1;
+    let offset = 0;
+
+    while (totalBytes < 0 || offset < totalBytes) {
+      const result = await OfflineOcrAssets.readLanguageChunk({
+        code,
+        offset,
+        length: NATIVE_OCR_CHUNK_BYTES,
+      });
+      if (!Number.isInteger(result.totalBytes) || result.totalBytes < 1 || result.totalBytes > 20 * 1024 * 1024) {
+        throw new Error(`Invalid bundled OCR model size for ${code}.`);
+      }
+      if (totalBytes >= 0 && totalBytes !== result.totalBytes) {
+        throw new Error(`Bundled OCR model size changed while reading ${code}.`);
+      }
+      totalBytes = result.totalBytes;
+      if (result.offset !== offset) throw new Error(`Bundled OCR model chunk was out of order for ${code}.`);
+
+      const chunk = decodeBase64Bytes(result.data);
+      if (chunk.length === 0 && offset < totalBytes) {
+        throw new Error(`Bundled OCR model ended early for ${code}.`);
+      }
+      chunks.push(chunk);
+      offset += chunk.length;
+    }
+
+    if (offset !== totalBytes) throw new Error(`Bundled OCR model length mismatch for ${code}.`);
+    const complete = new Uint8Array(totalBytes);
+    let writeOffset = 0;
+    for (const chunk of chunks) {
+      complete.set(chunk, writeOffset);
+      writeOffset += chunk.length;
+    }
+    return complete;
+  })();
+
+  nativeOcrLanguageCache.set(code, pending);
+  void pending.catch(() => {
+    if (nativeOcrLanguageCache.get(code) === pending) nativeOcrLanguageCache.delete(code);
+  });
+  return pending;
+}
+
+async function loadNativeOcrLanguages(languageCode: string) {
+  const codes = languageCode.split('+').map(asOfflineOcrLanguageCode);
+  progress('خواندن زبان‌های آفلاین از فایل برنامه...', 25);
+  const models = await Promise.all(codes.map(async (code) => ({
+    code,
+    data: await loadNativeOcrLanguage(code),
+  })));
+  progress('مدل‌های آفلاین آمادهٔ پردازش هستند...', 27);
+  return models;
 }
 
 type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
@@ -177,7 +254,14 @@ async function getOcrWorker(
         }
       },
     };
-    const created = createWorker(languageCode, 1, createWorkerOptions as Parameters<typeof createWorker>[2]);
+    const workerOptions = createWorkerOptions as Parameters<typeof createWorker>[2];
+    const created = (async () => {
+      if (Capacitor.getPlatform() === 'android') {
+        const models = await loadNativeOcrLanguages(languageCode);
+        return createWorker(models, 1, workerOptions);
+      }
+      return createWorker(languageCode, 1, workerOptions);
+    })();
 
     let trackedPromise: Promise<OcrWorker>;
     trackedPromise = created.then(

@@ -72,10 +72,9 @@ public class OfflineOcrEmulatorTest {
             );
 
             evaluate(scenario,
-                "(() => { window.__emulatorOcrErrors = []; window.__emulatorOcrDebug = true; window.__emulatorOcrProgress = null; window.__emulatorOcrWorkerStatus = null; window.__emulatorTessdataProbe = 'pending'; " +
+                "(() => { window.__emulatorOcrErrors = []; window.__emulatorOcrDebug = true; window.__emulatorOcrProgress = null; window.__emulatorOcrWorkerStatus = null; " +
                 "window.addEventListener('error', e => window.__emulatorOcrErrors.push(String(e.message || e.error || 'window error'))); " +
                 "window.addEventListener('unhandledrejection', e => window.__emulatorOcrErrors.push(String(e.reason || 'unhandled rejection'))); " +
-                "fetch('/tessdata/fas.traineddata.gz').then(r => window.__emulatorTessdataProbe = JSON.stringify({status:r.status,url:r.url,length:r.headers.get('content-length')})).catch(e => window.__emulatorTessdataProbe = String(e)); " +
                 "return 'armed'; })()"
             );
 
@@ -92,7 +91,7 @@ public class OfflineOcrEmulatorTest {
             while (SystemClock.elapsedRealtime() < ocrDeadline) {
                 lastBody = evaluate(scenario, "document.body ? document.body.innerText : ''");
                 String progressSnapshot = evaluate(scenario,
-                    "JSON.stringify({progress: window.__emulatorOcrProgress || null, worker: window.__emulatorOcrWorkerStatus || null, core: window.__emulatorOcrCorePath || null, asset: window.__emulatorTessdataProbe || null, userAgent: navigator.userAgent})"
+                    "JSON.stringify({progress: window.__emulatorOcrProgress || null, worker: window.__emulatorOcrWorkerStatus || null, core: window.__emulatorOcrCorePath || null, userAgent: navigator.userAgent})"
                 );
                 if (!"{\"progress\":null,\"worker\":null}".equals(progressSnapshot)) lastOcrProgress = progressSnapshot;
                 if (lastBody.contains("دقت خوانش:")) {

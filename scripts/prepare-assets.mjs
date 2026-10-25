@@ -56,6 +56,17 @@ for (const [source, name] of assets) {
       sourceCode += '\nself.TesseractCoreWASM = self.TesseractCoreASM;\n';
     }
     if (name === 'worker.min.js') {
+      // Tesseract's Lang[] overload contains bytes in `data`; initialization must
+      // receive the language `code`, not the byte array, after those bytes load.
+      const languageCodePatch = sourceCode.replace(
+        'a.map((function(t){return"string"==typeof t?t:t.data})).join("+")',
+        'a.map((function(t){return"string"==typeof t?t:t.code})).join("+")'
+      );
+      if (languageCodePatch === sourceCode) {
+        throw new Error('[prepare-assets] Could not patch Tesseract Lang[] initialization');
+      }
+      sourceCode = languageCodePatch;
+
       // Surface whether the Android WebView's WebAssembly compiler actually
       // resolves; Tesseract otherwise reports no progress while Core() awaits it.
       const wasmProbe = sourceCode.replace(
