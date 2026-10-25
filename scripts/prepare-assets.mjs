@@ -46,7 +46,26 @@ for (const [source, name] of assets) {
     // Tesseract.js core bundles ship optional chaining/nullish coalescing that
     // Chrome 69 (Android 7's WebView) cannot parse. They are copied outside
     // Vite's module graph, so transpile every standalone JS worker/core here.
-    const { code } = await transform(fs.readFileSync(source, 'utf8'), {
+    let sourceCode = fs.readFileSync(source, 'utf8');
+    if (name.startsWith('tesseract-core-') && name.endsWith('.wasm.js')) {
+      // Chrome 69 can hang when Emscripten tries streaming compilation from an
+      // embedded data: URL in a Web Worker. Decode the bundled bytes directly
+      // and use WebAssembly.instantiate instead of fetch/instantiateStreaming.
+      const withoutFetch = sourceCode.replace(
+        /function Na\(a\)\{[\s\S]*?\}function Oa/,
+        'function Na(a){return Promise.resolve().then(()=>Ma(a))}function Oa'
+      );
+      const withoutStreaming = withoutFetch.replace(
+        /function Pa\(a,c\)\{[\s\S]*?\}var y,z,/,
+        'function Pa(a,c){return Oa(Ka,a,c)}var y,z,'
+      );
+      if (withoutFetch === sourceCode || withoutStreaming === withoutFetch) {
+        throw new Error(`[prepare-assets] Could not apply Android 7 WebAssembly fallback to ${name}`);
+      }
+      sourceCode = withoutStreaming;
+    }
+
+    const { code } = await transform(sourceCode, {
       target: 'chrome69',
       minify: true,
     });
