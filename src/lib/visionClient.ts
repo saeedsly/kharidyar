@@ -14,7 +14,7 @@ const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
   'fa-en': 'fas+eng',
   'tr-en': 'tur+eng',
 };
-const MAX_RECEIPT_EDGE = 1500;
+const MAX_RECEIPT_EDGE = 2800;
 const MAX_SCAN_TIME_MS = 60_000;
 const MAX_NATIVE_SCAN_TIME_MS = 180_000;
 const WORKER_IDLE_MS = 60_000;
@@ -277,7 +277,7 @@ export async function normalizeAndCompressReceiptPhoto(
       // No-op on older WebViews.
     }
 
-    const blob = await canvasToJpeg(canvas, 0.78);
+    const blob = await canvasToJpeg(canvas, 0.92);
     const compressedFile = new File([blob], `receipt-${Date.now()}.jpg`, { type: 'image/jpeg' });
     const previewUrl = URL.createObjectURL(blob);
     return { compressedFile, previewUrl, width, height, sizeBytes: blob.size };

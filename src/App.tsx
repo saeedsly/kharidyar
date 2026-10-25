@@ -3,15 +3,13 @@ import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import QRCode from 'qrcode';
 import {
-  Award,
   Camera,
   CheckCircle2,
   Download,
-  ExternalLink,
   Home,
   HardDrive,
-  Linkedin,
   ListChecks,
+  LockKeyhole,
   Maximize2,
   ReceiptText,
   ScanLine,
@@ -44,7 +42,7 @@ import { ShoppingListTab } from './components/ShoppingListTab';
 import { ReceiptsTab } from './components/ReceiptsTab';
 import { ServerConnectTab } from './components/ServerConnectTab';
 import { ScannerModal } from './components/ScannerModal';
-import { AboutOwnerModal, OWNER_LINKEDIN_URL } from './components/AboutOwnerModal';
+import { PrivacyModal } from './components/PrivacyModal';
 
 type TabKey = 'dashboard' | 'list' | 'receipts' | 'connect';
 
@@ -56,7 +54,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [desktopPhoneFrame, setDesktopPhoneFrame] = useState<boolean>(() => !isNative);
-  const [aboutModalOpen, setAboutModalOpen] = useState<boolean>(false);
+  const [privacyModalOpen, setPrivacyModalOpen] = useState<boolean>(false);
 
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [items, setItems] = useState<ShoppingItem[]>([]);
@@ -373,19 +371,19 @@ export default function App() {
             <h1 className="text-base font-black tracking-tight text-slate-900 leading-none">
               خریدیـار
             </h1>
-            <p className="text-[11px] font-medium text-slate-500 mt-1">همراه هوشمند خرید من</p>
+            <p className="text-[11px] font-medium text-slate-500 mt-1">فاکتورها و فهرست خرید</p>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => setAboutModalOpen(true)}
-            title="درباره سازنده و مالکیت اثر (سعید سالاری)"
+            onClick={() => setPrivacyModalOpen(true)}
+            aria-label="حریم خصوصی"
             className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200/80 px-2.5 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100 transition cursor-pointer"
           >
-            <Award className="h-3.5 w-3.5" />
-            <span>مالکیت اثر</span>
+            <LockKeyhole className="h-3.5 w-3.5" />
+            <span>حریم خصوصی</span>
           </button>
 
           <button
@@ -394,7 +392,7 @@ export default function App() {
             className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 text-[11px] font-bold text-emerald-800 cursor-pointer"
           >
             <WifiOff className="h-3.5 w-3.5" />
-            روی گوشی
+            روی دستگاه
           </button>
         </div>
       </header>
@@ -421,7 +419,6 @@ export default function App() {
               setSelectedReceipt(r);
               setActiveTab('receipts');
             }}
-            onOpenAboutOwner={() => setAboutModalOpen(true)}
           />
         )}
 
@@ -459,7 +456,7 @@ export default function App() {
             onExportBackup={handleExportBackup}
             onImportBackup={handleImportBackup}
             onClearAllUserData={handleClearAllUserData}
-            onOpenAboutOwner={() => setAboutModalOpen(true)}
+            onOpenPrivacy={() => setPrivacyModalOpen(true)}
           />
         )}
       </main>
@@ -539,18 +536,7 @@ export default function App() {
         <div className="mx-auto max-w-2xl min-h-screen bg-[#F4F6FA] shadow-xl flex flex-col">
           {!isNative && (
             <div className="hidden lg:flex items-center justify-between bg-slate-900 text-white px-5 py-2.5 text-xs">
-              <div className="flex items-center gap-3">
-                <span className="font-bold">وب‌اپلیکیشن «خریدیـار» — اثر سعید سالاری</span>
-                <a
-                  href={OWNER_LINKEDIN_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-lg bg-[#0A66C2] px-2.5 py-1 font-bold hover:bg-[#004182]"
-                >
-                  <Linkedin className="h-3 w-3 fill-current" />
-                  LinkedIn
-                </a>
-              </div>
+              <span className="font-bold">خریدیـار — فاکتورها و فهرست خرید</span>
               <div className="flex items-center gap-2.5">
                 <a
                   href={apkDownloadUrl}
@@ -558,7 +544,7 @@ export default function App() {
                   className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1 font-bold hover:bg-blue-500"
                 >
                   <Download className="h-3.5 w-3.5" />
-                  دانلود APK اندروید
+                  دانلود نسخهٔ اندروید
                 </a>
                 <button
                   type="button"
@@ -566,7 +552,7 @@ export default function App() {
                   className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-3 py-1 font-semibold hover:bg-white/25 cursor-pointer"
                 >
                   <Smartphone className="h-3.5 w-3.5" />
-                  نمای موبایل + پنل معرفی
+                  نمای موبایل
                 </button>
               </div>
             </div>
@@ -588,7 +574,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right-Hand Showcase + Founder Bio + LinkedIn + Download */}
+            {/* Desktop app preview and download actions */}
             <div className="col-span-7 space-y-4">
               <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-xs font-bold text-emerald-700 shadow-2xs border border-emerald-200/80">
                 <WifiOff className="h-3.5 w-3.5" />
@@ -596,65 +582,34 @@ export default function App() {
               </div>
 
               <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-snug">
-                اپلیکیشن هوشمند <span className="text-blue-600">«خریدیـار»</span>
+                خریدیـار
                 <span className="block text-base font-bold text-slate-600 mt-1">
-                  اسکن حرفه‌ای فاکتور با بینایی ماشین، ثبت خودکار اقلام و چک‌لیست ضد فراموشی خرید
+                  اسکن فاکتور و مدیریت فهرست خرید؛ بدون نیاز به اینترنت
                 </span>
               </h1>
 
-              {/* Executive Founder Bio & LinkedIn Direct Card on Desktop Hero */}
-              <div className="rounded-3xl bg-white p-5 border border-slate-200/80 shadow-xs space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
-                    <img
-                      src={assetUrl('icon-192.png')}
-                      alt="نشان خریدیـار"
-                      className="h-14 w-14 rounded-2xl object-cover border border-blue-200 bg-blue-50 shrink-0"
-                    />
-                    <div>
-                      <span className="text-[11px] font-extrabold text-blue-600">
-                        بنیان‌گذار، طراح و صاحب امتیاز اثر
-                      </span>
-                      <h2 className="text-base font-black text-slate-900">
-                        سعید سالاری <span className="text-xs font-bold text-slate-400">(Saeed Salari)</span>
-                      </h2>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        مهندس نرم‌افزار فول‌استک • هوش مصنوعی، بینایی ماشین و معماری ابری
-                      </p>
-                    </div>
-                  </div>
-
-                  <a
-                    href={OWNER_LINKEDIN_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 inline-flex items-center gap-2 rounded-2xl bg-[#0A66C2] px-4 py-3 text-xs font-extrabold text-white shadow-sm hover:bg-[#004182] transition"
-                  >
-                    <Linkedin className="h-4 w-4 fill-current" />
-                    <span>پروفایل رسمی لینکدین</span>
-                    <ExternalLink className="h-3.5 w-3.5 opacity-85" />
-                  </a>
+              <div className="flex items-start gap-3 rounded-3xl bg-white p-4 border border-slate-200/80 shadow-xs">
+                <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
+                <div className="flex-1">
+                  <h2 className="text-sm font-extrabold text-slate-900">اطلاعات روی دستگاه شما می‌ماند</h2>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                    فاکتورها و فهرست‌ها روی دستگاه ذخیره می‌شوند؛ تصویر برای پردازش به سرور فرستاده نمی‌شود.
+                  </p>
                 </div>
-
-                <p className="text-xs leading-relaxed text-slate-600 border-t border-slate-100 pt-2.5">
-                  تمامی حقوق مادی، معنوی، معماری فنی و هویت بصری اپلیکیشن «خریدیـار | KharidYar»
-                  محفوظ و متعلق به <strong>سعید سالاری</strong> می‌باشد.{' '}
-                  <button
-                    type="button"
-                    onClick={() => setAboutModalOpen(true)}
-                    className="font-bold text-blue-600 hover:underline cursor-pointer"
-                  >
-                    مشاهده کامل بیانیه مالکیت و حریم خصوصی ←
-                  </button>
-                </p>
+                <button
+                  type="button"
+                  onClick={() => setPrivacyModalOpen(true)}
+                  className="shrink-0 rounded-xl bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 cursor-pointer"
+                >
+                  جزئیات
+                </button>
               </div>
 
-              {/* Instant Live CV Test Card */}
               <div className="rounded-3xl bg-white p-5 border border-slate-200/80 shadow-xs space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
                     <ScanLine className="h-4.5 w-4.5 text-blue-600" />
-                    تست زنده بینایی ماشین همین الان با یک کلیک:
+                    فاکتورهای نمونه
                   </h2>
                   <button
                     type="button"
@@ -675,10 +630,10 @@ export default function App() {
                     <Sparkles className="h-6 w-6 text-blue-600 shrink-0" />
                     <div>
                       <p className="text-xs font-extrabold text-slate-900">
-                        اسکن زنده فاکتور افق کوروش
+                        فاکتور نمونهٔ افق کوروش
                       </p>
                       <p className="text-[11px] text-slate-600 mt-0.5">
-                        تیک خوردن ۵ قلم + هشدار ۲ قلم جامانده!
+                        نمونه برای بررسی اسکن
                       </p>
                     </div>
                   </button>
@@ -691,10 +646,10 @@ export default function App() {
                     <CheckCircle2 className="h-6 w-6 text-emerald-600 shrink-0" />
                     <div>
                       <p className="text-xs font-extrabold text-slate-900">
-                        اسکن فاکتور تکمیلی جانبو
+                        فاکتور نمونهٔ جانبو
                       </p>
                       <p className="text-[11px] text-slate-600 mt-0.5">
-                        تکمیل روغن مایع و گوجه فرنگی جامانده
+                        نمونه برای بررسی اسکن
                       </p>
                     </div>
                   </button>
@@ -706,7 +661,7 @@ export default function App() {
                 <div className="space-y-2.5">
                   <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-700">
                     <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping" />
-                    نسخهٔ عمومی فعلی اندروید • v1.4.2
+                    نسخهٔ اندروید ۱.۴.۲
                   </span>
                   <div className="flex flex-wrap items-center gap-2.5 pt-1">
                     <a
@@ -723,7 +678,7 @@ export default function App() {
                       className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-xs font-bold text-white hover:bg-slate-800 transition cursor-pointer"
                     >
                       <Camera className="h-4 w-4" />
-                      اسکن عکس فاکتور واقعی
+                      اسکن فاکتور
                     </button>
                   </div>
                 </div>
@@ -736,7 +691,7 @@ export default function App() {
                       className="h-24 w-24 rounded-xl bg-white p-1"
                     />
                     <span className="block mt-1 text-[10px] font-bold text-slate-600">
-                      اسکن جهت نصب
+                      دریافت با QR
                     </span>
                   </div>
                 )}
@@ -761,10 +716,9 @@ export default function App() {
         onConfirmSave={handleConfirmSaveReceipt}
       />
 
-      {/* Official Creator Bio, Intellectual Property & Google Privacy Policy Modal */}
-      <AboutOwnerModal
-        isOpen={aboutModalOpen}
-        onClose={() => setAboutModalOpen(false)}
+      <PrivacyModal
+        isOpen={privacyModalOpen}
+        onClose={() => setPrivacyModalOpen(false)}
         onClearAllUserData={handleClearAllUserData}
       />
     </div>

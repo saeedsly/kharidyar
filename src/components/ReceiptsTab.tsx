@@ -160,14 +160,14 @@ export function ReceiptsTab({
               <div className="flex items-center justify-between rounded-2xl bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
                 <span className="inline-flex items-center gap-1.5 font-medium">
                   <Cpu className="h-4 w-4 text-blue-600" />
-                  {selectedReceipt.ocr_engine}
+                  پردازش آفلاین
                 </span>
                 <span className="font-bold text-emerald-600 tabular-fa">
-                  دقت تشخیص: {toPersianDigits(selectedReceipt.ocr_confidence || 97)}٪
+                  اطمینان خوانش: {toPersianDigits(selectedReceipt.ocr_confidence ?? 0)}٪
                 </span>
               </div>
 
-              {/* Optional Scanned Receipt Image Preview (Original vs OpenCV Scan) */}
+              {/* Scanned receipt image preview */}
               {(selectedReceipt.image_url || selectedReceipt.processed_image_url) && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -179,7 +179,7 @@ export function ReceiptsTab({
                         className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-600 cursor-pointer"
                       >
                         <Eye className="h-3.5 w-3.5" />
-                        {showEnhancedImg ? 'نمایش عکس اصلی' : 'نمایش خروجی OpenCV'}
+                        {showEnhancedImg ? 'نمایش عکس اصلی' : 'نمایش تصویر پردازش‌شده'}
                       </button>
                     )}
                   </div>

@@ -68,10 +68,10 @@ public class OfflineOcrEmulatorTest {
                 } catch (AssertionError error) {
                     throw new AssertionError("WebView startup evaluation failed. Console: " + browserConsole.get(), error);
                 }
-                if (body.contains("تست زنده اسکنر هوشمند")) break;
+                if (body.contains("فاکتور نمونه")) break;
                 SystemClock.sleep(500);
             }
-            if (!body.contains("تست زنده اسکنر هوشمند")) {
+            if (!body.contains("فاکتور نمونه")) {
                 // If startup failed before diagnostics were attached, reload only on failure so
                 // the browser console captures the actual JavaScript compatibility error.
                 scenario.onActivity(activity -> activity.getBridge().getWebView().reload());
@@ -91,7 +91,7 @@ public class OfflineOcrEmulatorTest {
             assertTrue(
                 "The app UI did not load in the emulator. Native URL: " + getNativeUrl(scenario) +
                 " Page state: " + pageState + " Console: " + browserConsole.get(),
-                body.contains("تست زنده اسکنر هوشمند")
+                body.contains("فاکتور نمونه")
             );
 
             evaluate(scenario,
@@ -103,7 +103,7 @@ public class OfflineOcrEmulatorTest {
 
             String clickResult = evaluate(scenario,
                 "(() => { const button = Array.from(document.querySelectorAll('button')) " +
-                ".find(element => (element.innerText || '').includes('تست زنده اسکنر هوشمند')); " +
+                ".find(element => (element.innerText || '').includes('فاکتور نمونه')); " +
                 "if (!button) return 'button-not-found'; button.click(); return 'sample-scan-started'; })()"
             );
             assertEquals("The built-in receipt test button could not be activated.", "sample-scan-started", clickResult);
@@ -117,7 +117,7 @@ public class OfflineOcrEmulatorTest {
                     "JSON.stringify({progress: window.__emulatorOcrProgress || null, worker: window.__emulatorOcrWorkerStatus || null, core: window.__emulatorOcrCorePath || null, userAgent: navigator.userAgent})"
                 );
                 if (!"{\"progress\":null,\"worker\":null}".equals(progressSnapshot)) lastOcrProgress = progressSnapshot;
-                if (lastBody.contains("دقت خوانش:")) {
+                if (lastBody.contains("اطمینان خوانش:")) {
                     evaluate(scenario,
                         "(() => { const button = Array.from(document.querySelectorAll('button')) " +
                         ".find(element => (element.innerText || '').includes('متن خام OCR')); " +
@@ -125,7 +125,17 @@ public class OfflineOcrEmulatorTest {
                     );
                     String reviewedBody = evaluate(scenario, "document.body ? document.body.innerText : ''");
                     assertFalse("OCR completed but returned no recognized text.", reviewedBody.contains("متنی یافت نشد"));
-                    System.out.println("OFFLINE_OCR_EMULATOR_PASS: built-in Ofogh receipt completed and produced OCR text.");
+                    String rawOcrText = evaluate(scenario,
+                        "(() => { const node = document.querySelector('div.font-mono'); return node ? node.innerText : ''; })()"
+                    );
+                    int recognizedLines = 0;
+                    for (String line : rawOcrText.split("\\n")) {
+                        if (!line.trim().isEmpty()) recognizedLines++;
+                    }
+                    assertTrue("OCR returned only a short fragment of the receipt (" + rawOcrText.length() + " characters).", rawOcrText.length() >= 150);
+                    assertTrue("OCR did not return enough receipt lines (" + recognizedLines + ").", recognizedLines >= 8);
+                    System.out.println("OFFLINE_OCR_EMULATOR_PASS: sample receipt produced " + rawOcrText.length() +
+                        " OCR characters across " + recognizedLines + " lines.");
                     return;
                 }
                 if (lastBody.contains("خواندن فاکتور در زمان مجاز تمام نشد")) {

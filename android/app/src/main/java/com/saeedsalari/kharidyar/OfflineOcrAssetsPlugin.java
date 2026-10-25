@@ -1,15 +1,22 @@
 package com.saeedsalari.kharidyar;
 
+import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Rect;
+import android.net.Uri;
 import android.util.Base64;
 import android.util.Log;
+import android.webkit.MimeTypeMap;
+import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.googlecode.tesseract.android.ResultIterator;
 import com.googlecode.tesseract.android.TessBaseAPI;
@@ -18,6 +25,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -30,13 +38,134 @@ public class OfflineOcrAssetsPlugin extends Plugin {
     private static final String TAG = "OfflineOcrAssets";
     private static final int MAX_IMAGE_BASE64_CHARS = 12 * 1024 * 1024;
     private static final int MAX_IMAGE_EDGE = 5000;
+    private static final long MAX_PICKED_IMAGE_BYTES = 40L * 1024L * 1024L;
     private static final int COPY_BUFFER_BYTES = 64 * 1024;
 
     private final ExecutorService ocrExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean scanRunning = new AtomicBoolean(false);
     private volatile TessBaseAPI activeTessApi;
     private TessBaseAPI tessBaseApi;
     private String initializedLanguage = "";
+
+    /** Opens Android's system document picker without requesting broad storage permissions. */
+    @PluginMethod
+    public void pickReceiptImage(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        try {
+            startActivityForResult(call, intent, "handlePickedReceiptImage");
+        } catch (ActivityNotFoundException error) {
+            call.reject("Android could not open the file picker.", error);
+        }
+    }
+
+    @ActivityCallback
+    private void handlePickedReceiptImage(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            call.reject("Image selection cancelled.", "PICKER_CANCELLED");
+            return;
+        }
+
+        Uri imageUri = result.getData().getData();
+        if (imageUri == null) {
+            call.reject("No image was selected.");
+            return;
+        }
+
+        boolean hasPersistedReadPermission = false;
+        try {
+            getContext().getContentResolver().takePersistableUriPermission(
+                imageUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            );
+            hasPersistedReadPermission = true;
+        } catch (SecurityException | IllegalArgumentException ignored) {
+            // Some document providers grant temporary access only; the image is copied immediately.
+        }
+
+        final boolean releasePermissionAfterCopy = hasPersistedReadPermission;
+        try {
+            fileExecutor.execute(() -> copyPickedImageToCache(call, imageUri, releasePermissionAfterCopy));
+        } catch (RejectedExecutionException error) {
+            call.reject("The image picker is shutting down.", error);
+        }
+    }
+
+    private void copyPickedImageToCache(PluginCall call, Uri imageUri, boolean releasePermissionAfterCopy) {
+        File copiedFile = null;
+        try {
+            String mimeType = getContext().getContentResolver().getType(imageUri);
+            String imageMimeType = mimeType != null && mimeType.toLowerCase(Locale.ROOT).startsWith("image/")
+                ? mimeType
+                : null;
+            String extension = imageMimeType == null
+                ? null
+                : MimeTypeMap.getSingleton().getExtensionFromMimeType(imageMimeType);
+            if (extension == null || extension.isEmpty()) extension = "jpg";
+
+            File pickerDirectory = new File(getContext().getCacheDir(), "receipt-picker");
+            if (!pickerDirectory.isDirectory() && !pickerDirectory.mkdirs() && !pickerDirectory.isDirectory()) {
+                throw new IOException("Could not create the temporary image directory.");
+            }
+            removeExpiredPickedImages(pickerDirectory);
+            copiedFile = File.createTempFile("receipt-", "." + extension, pickerDirectory);
+
+            long totalBytes = 0;
+            try (InputStream input = getContext().getContentResolver().openInputStream(imageUri);
+                 BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(copiedFile))) {
+                if (input == null) throw new IOException("Android could not read the selected image.");
+                byte[] buffer = new byte[COPY_BUFFER_BYTES];
+                int bytesRead;
+                while ((bytesRead = input.read(buffer)) != -1) {
+                    totalBytes += bytesRead;
+                    if (totalBytes > MAX_PICKED_IMAGE_BYTES) {
+                        throw new IOException("The selected image is larger than 40 MB.");
+                    }
+                    output.write(buffer, 0, bytesRead);
+                }
+            }
+            if (totalBytes == 0) throw new IOException("The selected image is empty.");
+            BitmapFactory.Options imageBounds = new BitmapFactory.Options();
+            imageBounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(copiedFile.getAbsolutePath(), imageBounds);
+            if (imageBounds.outWidth <= 0 || imageBounds.outHeight <= 0) {
+                throw new IOException("The selected file is not a readable image.");
+            }
+
+            JSObject pickedImage = new JSObject();
+            pickedImage.put("path", copiedFile.getAbsolutePath());
+            pickedImage.put("mimeType", imageMimeType == null ? "" : imageMimeType);
+            call.resolve(pickedImage);
+        } catch (Exception error) {
+            if (copiedFile != null) copiedFile.delete();
+            Log.e(TAG, "Could not copy the selected receipt image", error);
+            call.reject("Could not read the selected image.", error);
+        } finally {
+            if (releasePermissionAfterCopy) {
+                try {
+                    getContext().getContentResolver().releasePersistableUriPermission(
+                        imageUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    );
+                } catch (SecurityException | IllegalArgumentException ignored) {
+                    // The selected document provider may have granted temporary access only.
+                }
+            }
+        }
+    }
+
+    private void removeExpiredPickedImages(File pickerDirectory) {
+        File[] files = pickerDirectory.listFiles();
+        if (files == null) return;
+        long expirationTime = System.currentTimeMillis() - 24L * 60L * 60L * 1000L;
+        for (File file : files) {
+            if (file.isFile() && file.lastModified() < expirationTime) file.delete();
+        }
+    }
 
     @PluginMethod
     public void recognizeReceipt(PluginCall call) {
@@ -83,6 +212,34 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         call.resolve();
     }
 
+    private static final class RecognitionPass {
+        final String text;
+        final int confidence;
+        final JSArray lines;
+
+        RecognitionPass(String text, int confidence, JSArray lines) {
+            this.text = text == null ? "" : text;
+            this.confidence = confidence;
+            this.lines = lines;
+        }
+
+        int score() {
+            return confidence * 2 + Math.min(60, lines.length() * 3) + Math.min(40, text.length() / 12);
+        }
+    }
+
+    private RecognitionPass recognizeWithPageSegMode(TessBaseAPI api, Bitmap bitmap, int pageSegMode) {
+        api.setPageSegMode(pageSegMode);
+        api.setImage(bitmap);
+        api.getHOCRText(0);
+        return new RecognitionPass(api.getUTF8Text(), api.meanConfidence(), extractTextLines(api));
+    }
+
+    private boolean shouldRetryRecognition(RecognitionPass result, Bitmap bitmap) {
+        int minimumCharacters = Math.max(80, Math.min(200, bitmap.getHeight() / 10));
+        return result.confidence < 75 || result.lines.length() < 10 || result.text.trim().length() < minimumCharacters;
+    }
+
     private void performRecognition(PluginCall call, String imageBase64, String language, int expectedWidth, int expectedHeight) {
         Bitmap bitmap = null;
         TessBaseAPI api = null;
@@ -98,19 +255,28 @@ public class OfflineOcrAssetsPlugin extends Plugin {
             String dataPath = ensureLanguageModels(language);
             api = getOrCreateTessApi(dataPath, language);
             activeTessApi = api;
-            api.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO);
-            api.setImage(bitmap);
+            boolean portraitReceipt = bitmap.getHeight() > bitmap.getWidth() * 1.15f;
+            int primaryMode = portraitReceipt
+                ? TessBaseAPI.PageSegMode.PSM_SINGLE_COLUMN
+                : TessBaseAPI.PageSegMode.PSM_AUTO;
+            int alternateMode = portraitReceipt
+                ? TessBaseAPI.PageSegMode.PSM_AUTO
+                : TessBaseAPI.PageSegMode.PSM_SINGLE_COLUMN;
 
             sendProgress("در حال خواندن متن فاکتور با موتور بومی...", 0);
-            // HOCR recognition is cancellable and provides native progress callbacks.
-            api.getHOCRText(0);
-            String text = api.getUTF8Text();
-            JSArray lines = extractTextLines(api);
+            // A long receipt is usually one text column. If the first layout is sparse or weak,
+            // retry once with the alternate segmentation mode and keep the stronger result.
+            RecognitionPass bestPass = recognizeWithPageSegMode(api, bitmap, primaryMode);
+            if (shouldRetryRecognition(bestPass, bitmap)) {
+                sendProgress("در حال بررسی دوبارهٔ متن فاکتور...", 0);
+                RecognitionPass alternatePass = recognizeWithPageSegMode(api, bitmap, alternateMode);
+                if (alternatePass.score() > bestPass.score()) bestPass = alternatePass;
+            }
 
             JSObject result = new JSObject();
-            result.put("text", text == null ? "" : text);
-            result.put("confidence", api.meanConfidence());
-            result.put("lines", lines);
+            result.put("text", bestPass.text);
+            result.put("confidence", bestPass.confidence);
+            result.put("lines", bestPass.lines);
             call.resolve(result);
         } catch (Exception error) {
             Log.e(TAG, "Native offline OCR failed", error);
@@ -142,6 +308,12 @@ public class OfflineOcrAssetsPlugin extends Plugin {
             if (!created.init(dataPath, language, TessBaseAPI.OEM_LSTM_ONLY)) {
                 created.recycle();
                 throw new IllegalStateException("Tesseract could not initialize language " + language + ".");
+            }
+            if (!created.setVariable("user_defined_dpi", "300")) {
+                Log.w(TAG, "Tesseract did not accept the receipt DPI hint");
+            }
+            if (!created.setVariable("preserve_interword_spaces", "1")) {
+                Log.w(TAG, "Tesseract did not enable preserved spaces");
             }
             created.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO);
             tessBaseApi = created;
@@ -257,6 +429,7 @@ public class OfflineOcrAssetsPlugin extends Plugin {
             Log.w(TAG, "OCR executor was already shut down", error);
         }
         ocrExecutor.shutdown();
+        fileExecutor.shutdown();
         super.handleOnDestroy();
     }
 }

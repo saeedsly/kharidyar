@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type { ReceiptItem, ScanResponse, ShoppingItem, ShoppingList } from '../types';
 import { assetUrl } from '../lib/assetUrl';
+import { OfflineOcrAssets } from '../lib/offlineOcrAssets';
 import { cancelActiveOcrScan, type ReceiptOcrLanguage } from '../lib/visionClient';
 import {
   formatCurrency,
@@ -51,20 +52,20 @@ interface ScannerModalProps {
 const BUILTIN_SAMPLES = [
   {
     id: 'ofogh',
-    title: 'نمونه ۱: فروشگاه افق کوروش',
-    desc: '۵ قلم منطبق با لیست خرید + ۲ قلم جا مانده (تست هوشمند هشدار)',
+    title: 'فاکتور نمونهٔ افق کوروش',
+    desc: 'برای بررسی اسکن',
     thumb: 'samples/sample-ofogh.png',
   },
   {
     id: 'janbo',
-    title: 'نمونه ۲: فروشگاه جانبو (تکمیلی)',
-    desc: 'شامل روغن مایع و گوجه فرنگی برای تکمیل ۱۰۰٪ اقلام جامانده',
+    title: 'فاکتور نمونهٔ جانبو',
+    desc: 'برای بررسی اسکن',
     thumb: 'samples/sample-janbo.png',
   },
   {
     id: 'hyperstar',
-    title: 'نمونه ۳: هایپراستار ارم',
-    desc: 'فاکتور پروتئین و تره‌بار (مرغ تازه، برنج ایرانی، سیب درختی)',
+    title: 'فاکتور نمونهٔ هایپراستار ارم',
+    desc: 'برای بررسی اسکن',
     thumb: 'samples/sample-hyperstar.png',
   },
 ];
@@ -159,8 +160,8 @@ export function ScannerModal({
     if (Capacitor.isNativePlatform()) {
       try {
         const photo = await CapCamera.getPhoto({
-          quality: 76,
-          width: 1440,
+          quality: 95,
+          width: 3200,
           allowEditing: false,
           resultType: CameraResultType.Uri,
           source: CameraSource.Camera,
@@ -195,7 +196,7 @@ export function ScannerModal({
       });
     } catch {
       setCameraError(
-        'دسترسی مستقیم به وب‌کم فعال نشد؛ از دکمه «انتخاب از گالری / فایل» برای آپلود عکس فاکتور استفاده کنید.'
+        'دوربین باز نشد؛ می‌توانی تصویر فاکتور را از فایل‌ها انتخاب کنی.'
       );
     }
   };
@@ -210,7 +211,7 @@ export function ScannerModal({
     if (!context) return;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob((value) => resolve(value), 'image/jpeg', 0.78)
+      canvas.toBlob((value) => resolve(value), 'image/jpeg', 0.92)
     );
     stopCameraStream();
     if (!blob) {
@@ -221,24 +222,36 @@ export function ScannerModal({
   };
 
   const pickFromGallery = async () => {
+    if (Capacitor.getPlatform() === 'android') {
+      try {
+        const selected = await OfflineOcrAssets.pickReceiptImage();
+        if (!selected.path) throw new Error('فایلی انتخاب نشد.');
+        await executeScan({ imageUrl: Capacitor.convertFileSrc(selected.path) });
+      } catch (err: any) {
+        if (`${err?.code || ''} ${err?.message || ''}`.toLowerCase().includes('cancel')) return;
+        setCameraError('فایل تصویر باز نشد. دوباره انتخاب کن.');
+      }
+      return;
+    }
+
     if (Capacitor.isNativePlatform()) {
       try {
         const photo = await CapCamera.getPhoto({
-          quality: 76,
-          width: 1440,
+          quality: 95,
+          width: 3200,
           allowEditing: false,
           resultType: CameraResultType.Uri,
           source: CameraSource.Photos,
         });
         const imageUrl = photo.webPath || (photo.path ? Capacitor.convertFileSrc(photo.path) : null);
         if (imageUrl) await executeScan({ imageUrl });
-        return;
       } catch (err: any) {
         if (String(err?.message || '').toLowerCase().includes('cancel')) return;
-        setCameraError('عکس از گالری خوانده نشد؛ لطفاً یک عکس دیگر انتخاب کن.');
-        return;
+        setCameraError('فایل تصویر باز نشد. دوباره انتخاب کن.');
       }
+      return;
     }
+
     fileInputRef.current?.click();
   };
 
@@ -374,10 +387,10 @@ export function ScannerModal({
               </div>
               <div>
                 <h2 className="text-sm font-extrabold text-slate-900">
-                  اسکنر هوشمند فاکتور (بینایی ماشین)
+                  اسکنر هوشمند فاکتور
                 </h2>
                 <p className="text-[11px] text-slate-500">
-                  تشخیص خودکار فروشگاه، اقلام، قیمت‌ها و تطبیق با لیست خرید
+                  عکس بگیر یا فاکتور را از فایل‌ها انتخاب کن.
                 </p>
               </div>
             </div>
@@ -454,7 +467,7 @@ export function ScannerModal({
                     <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
                       <span>
                         <span className="block text-xs font-extrabold text-slate-800">زبان فاکتور</span>
-                        <span className="mt-0.5 block text-[10px] text-slate-500">انتخاب زبان مناسب، خوانش را سریع‌تر و دقیق‌تر می‌کند.</span>
+                        <span className="mt-0.5 block text-[10px] text-slate-500">زبان متن فاکتور را انتخاب کن.</span>
                       </span>
                       <select
                         value={ocrLanguage}
@@ -472,9 +485,9 @@ export function ScannerModal({
                         className="flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-blue-600 p-6 text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700 transition cursor-pointer"
                       >
                         <Camera className="h-8 w-8" />
-                        <span className="text-sm font-extrabold">باز کردن دوربین موبایل</span>
+                        <span className="text-sm font-extrabold">گرفتن عکس</span>
                         <span className="text-[11px] text-blue-100">
-                          عکسبرداری مستقیم از فاکتور کاغذی
+                          از فاکتور کاغذی
                         </span>
                       </button>
 
@@ -484,9 +497,9 @@ export function ScannerModal({
                         className="flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-slate-50 border-2 border-dashed border-slate-300 p-6 text-slate-800 hover:border-blue-500 hover:bg-blue-50/30 transition cursor-pointer"
                       >
                         <ImagePlus className="h-8 w-8 text-blue-600" />
-                        <span className="text-sm font-extrabold">انتخاب از گالری / فایل</span>
+                        <span className="text-sm font-extrabold">انتخاب فایل یا عکس</span>
                         <span className="text-[11px] text-slate-500">
-                          فشرده‌سازی خودکار و خوانش سریع
+                          از فایل‌های دستگاه
                         </span>
                       </button>
                     </div>
@@ -515,7 +528,7 @@ export function ScannerModal({
                   <div className="flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-blue-600" />
                     <h3 className="text-xs font-extrabold text-slate-900">
-                      تمرین اسکن آفلاین با چند فاکتور نمونه
+                      فاکتورهای نمونه
                     </h3>
                   </div>
 
@@ -537,7 +550,7 @@ export function ScannerModal({
                           <p className="text-[11px] text-slate-500 mt-0.5">{s.desc}</p>
                         </div>
                         <span className="shrink-0 rounded-xl bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white">
-                          اسکن زنده
+                          اسکن نمونه
                         </span>
                       </button>
                     ))}
@@ -570,7 +583,7 @@ export function ScannerModal({
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs font-extrabold text-slate-800 px-1 tabular-fa">
-                    <span>در حال خوانش هوشمند فاکتور...</span>
+                    <span>در حال خواندن فاکتور...</span>
                     <span className="text-blue-600">{toPersianDigits(progressPct)}٪</span>
                   </div>
                   <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
@@ -603,7 +616,7 @@ export function ScannerModal({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-xl tabular-fa">
                         <Cpu className="h-3.5 w-3.5" />
-                        دقت خوانش: {toPersianDigits(scanResult.receipt.ocr_confidence)}٪ (
+                        اطمینان خوانش: {toPersianDigits(scanResult.receipt.ocr_confidence)}٪ (
                         {toPersianDigits((scanResult.durationMs / 1000).toFixed(1))} ثانیه)
                       </span>
 

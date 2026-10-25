@@ -4,7 +4,6 @@ import {
   Download,
   FileJson2,
   HardDrive,
-  Info,
   LockKeyhole,
   ShieldCheck,
   Smartphone,
@@ -23,7 +22,7 @@ interface ServerConnectTabProps {
   onExportBackup: () => void;
   onImportBackup: (data: LocalAppData, budget?: number) => void;
   onClearAllUserData: () => Promise<void>;
-  onOpenAboutOwner: () => void;
+  onOpenPrivacy: () => void;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -52,7 +51,7 @@ export function ServerConnectTab({
   onExportBackup,
   onImportBackup,
   onClearAllUserData,
-  onOpenAboutOwner,
+  onOpenPrivacy,
 }: ServerConnectTabProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -129,9 +128,9 @@ export function ServerConnectTab({
             <ShieldCheck className="h-6 w-6 text-emerald-200" />
           </div>
           <div>
-            <h2 className="text-base font-black">خریدیـار، روی همین گوشی</h2>
+            <h2 className="text-base font-black">خریدیـار، روی همین دستگاه</h2>
             <p className="mt-1.5 text-xs leading-6 text-emerald-50/90">
-              اسکن فاکتور و ثبت خرید بدون سرور و بدون اینترنت انجام می‌شود. عکس فاکتور به جایی ارسال نمی‌شود؛ فقط اطلاعات خوانده‌شده روی دستگاه می‌ماند.
+              خواندن فاکتور و ذخیرهٔ خرید بدون اینترنت انجام می‌شود. تصویر فاکتور به سرور فرستاده نمی‌شود.
             </p>
           </div>
         </div>
@@ -203,17 +202,16 @@ export function ServerConnectTab({
           <h3 className="text-sm font-extrabold text-slate-900">حریم خصوصی و سازگاری</h3>
         </div>
         <div className="mt-3 space-y-2.5 text-xs leading-6 text-slate-600">
-          <p className="flex gap-2"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-emerald-600" />فاکتور روی گوشی پردازش می‌شود؛ هیچ عکس یا خریدی خودکار به اینترنت فرستاده نمی‌شود.</p>
-          <p className="flex gap-2"><Smartphone className="mt-1 h-4 w-4 shrink-0 text-blue-600" />هدف ساخت اندروید ۷ تا ۱۵ است؛ حداقل سیستم Android 7.0 (API 24).</p>
-          <p className="flex gap-2"><Info className="mt-1 h-4 w-4 shrink-0 text-slate-500" />برای خوانش سریع‌تر، یک موتور OCR استفاده می‌شود؛ زبان ترکی هم به‌صورت انتخابی در دسترس است.</p>
+          <p className="flex gap-2"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-emerald-600" />تصویر فاکتور روی دستگاه پردازش می‌شود و به اینترنت فرستاده نمی‌شود.</p>
+          <p className="flex gap-2"><Smartphone className="mt-1 h-4 w-4 shrink-0 text-blue-600" />سازگار با Android 7 تا 15.</p>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={onOpenAboutOwner}
+            onClick={onOpenPrivacy}
             className="rounded-xl bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200"
           >
-            دربارهٔ سازنده و حریم خصوصی
+            جزئیات حریم خصوصی
           </button>
           <button
             type="button"

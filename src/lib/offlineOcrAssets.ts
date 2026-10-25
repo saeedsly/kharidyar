@@ -18,6 +18,7 @@ export interface NativeOcrProgress {
 }
 
 interface OfflineOcrAssetsPlugin {
+  pickReceiptImage(): Promise<{ path: string; mimeType: string }>;
   recognizeReceipt(options: {
     imageBase64: string;
     language: string;
