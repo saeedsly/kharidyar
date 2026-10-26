@@ -64,8 +64,13 @@ jobs:
             adb shell svc wifi disable >/dev/null 2>&1 || true
             adb shell svc data disable >/dev/null 2>&1 || true
             set +e
-            ./gradlew --no-daemon :app:connectedDebugAndroidTest 2>&1 | tee ../emulator-test.log
-            test_status=${PIPESTATUS[0]}
+            rm -f ../android-test-exit-code
+            (./gradlew --no-daemon :app:connectedDebugAndroidTest; printf '%s\n' "$?" > ../android-test-exit-code) 2>&1 | tee ../emulator-test.log
+            if [ -f ../android-test-exit-code ]; then
+              test_status=$(cat ../android-test-exit-code)
+            else
+              test_status=1
+            fi
             printf '\nANDROID_TEST_GRADLE_EXIT_CODE=%s\n' "$test_status" | tee -a ../emulator-test.log
             adb logcat -d -v threadtime '*:E' OfflineOcrAssets:V AndroidRuntime:E > ../emulator-logcat.txt || true
             exit "$test_status"
