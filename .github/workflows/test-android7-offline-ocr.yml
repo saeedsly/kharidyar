@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - arena/6332d18e-kharidyar
+    paths-ignore:
+      - .github/workflows/build-android-apk.yml
+      - .github/workflows/test-android7-offline-ocr.yml
   workflow_dispatch:
 
 permissions:
