@@ -336,6 +336,7 @@ export function ScannerModal({
   const scanQualityNeedsReview = Boolean(
     scanResult &&
       (scanResult.receipt.ocr_confidence < 65 ||
+        (scanResult.ocrQuality?.unrecognizedItemCount || 0) > 0 ||
         !scanResult.ocrQuality?.amountReadFromReceipt ||
         !scanResult.ocrQuality?.subtotalReadFromReceipt ||
         scanResult.receipt.currency_detected === false ||
@@ -716,6 +717,11 @@ export function ScannerModal({
                               ? 'مبلغ نهایی با جمع ردیف‌ها و تخفیف هماهنگ است.'
                               : 'مبلغ نهایی با جمع ردیف‌ها جور درنمی‌آید؛ قبل از ثبت، اعداد را بررسی کن.'}
                         </p>
+                        {scanResult.ocrQuality.unrecognizedItemCount > 0 && (
+                          <p className="mt-1 text-[11px] font-bold leading-5">
+                            نام {toPersianDigits(scanResult.ocrQuality.unrecognizedItemCount)} ردیف از تصویر خوانده نشد؛ مبلغ آن حفظ شده تا نامش را بازبینی کنی.
+                          </p>
+                        )}
                         {!scanResult.ocrQuality.subtotalReadFromReceipt && (
                           <p className="mt-1 text-[11px] font-bold leading-5">
                             جمع اقلام چاپ‌شده پیدا نشد و از روی ردیف‌های خوانده‌شده محاسبه شده است.

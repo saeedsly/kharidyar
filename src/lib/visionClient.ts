@@ -677,6 +677,7 @@ export async function runOnDeviceAutonomousScan(
     const payableFromItems = Math.max(0, itemSubtotal - parsed.discount_total + parsed.tax_total);
     const ocrQuality = {
       itemCount: parsed.items.length,
+      unrecognizedItemCount: parsed.items.filter((item) => item.name.startsWith('کالای نامشخص')).length,
       amountReadFromReceipt: parsed.amount_read_from_receipt,
       subtotalReadFromReceipt: parsed.subtotal_read_from_receipt,
       itemTotalsMatchSubtotal: Math.abs(itemSubtotal - parsed.subtotal) <= amountTolerance,

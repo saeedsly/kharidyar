@@ -85,6 +85,29 @@ assert.equal(twoLineThermalReceipt.discount_total, 25_000);
 assert.equal(twoLineThermalReceipt.total_amount, 1_100_000);
 assert.equal(twoLineThermalReceipt.amount_read_from_receipt, true);
 
+const reversedRtlUnitReceipt = parsePersianReceiptText([
+  'فروشگاه نمونه',
+  'شیر کم چرب کاله',
+  '98,000 49,000 ددع 2',
+  'مبلغ قابل پرداخت (تومان): 98,000',
+]);
+assert.equal(reversedRtlUnitReceipt.items.length, 1);
+assert.equal(reversedRtlUnitReceipt.items[0].name, 'شیر کم چرب کاله');
+assert.equal(reversedRtlUnitReceipt.items[0].quantity, 2);
+assert.equal(reversedRtlUnitReceipt.items[0].total_price, 98_000);
+
+const receiptWithUnreadableProductName = parsePersianReceiptText([
+  'فروشگاه نمونه',
+  'شیر کم چرب کاله',
+  '98,000 49,000 ددع 2',
+  '65,000 65,000 ددع 1',
+  'مبلغ قابل پرداخت (تومان): 163,000',
+]);
+assert.equal(receiptWithUnreadableProductName.items.length, 2);
+assert.equal(receiptWithUnreadableProductName.items[0].name, 'شیر کم چرب کاله');
+assert.equal(receiptWithUnreadableProductName.items[1].name, 'کالای نامشخص 2');
+assert.equal(receiptWithUnreadableProductName.items[1].total_price, 65_000);
+
 const largeTomanReceipt = parsePersianReceiptText([
   'فروشگاه نمونه',
   'برنج هاشمی',

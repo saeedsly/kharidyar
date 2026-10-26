@@ -99,6 +99,7 @@ export interface ScanResponse {
   rawOcrText: string;
   ocrQuality?: {
     itemCount: number;
+    unrecognizedItemCount: number;
     amountReadFromReceipt: boolean;
     subtotalReadFromReceipt: boolean;
     itemTotalsMatchSubtotal: boolean;

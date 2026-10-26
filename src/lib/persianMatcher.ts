@@ -53,6 +53,7 @@ export function normalizePersianText(input: string): string {
     .replace(/٬/g, ',') // Persian thousands separator U+066C
     .replace(/٫/g, '.') // Arabic decimal separator U+066B
     .replace(/ـ/g, '') // Arabic tatweel is decorative, not part of product names or amounts.
+    .replace(/ددع/g, 'عدد') // A common RTL OCR reversal of the unit label.
     .replace(/\u200c/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -581,10 +582,18 @@ export function parsePersianReceiptText(
     if (linePrices.length === 0) {
       const letters = (line.match(/[\u0600-\u06FF\u00C0-\u024Fa-zA-Z]/g) || []).length;
       if (letters >= 3 && idx > 0) {
-        pendingProductTitle = {
-          text: line.replace(/^\d+\s*[-–.)]\s*/, '').trim(),
-          bbox: lineBoxes[idx] || null,
-        };
+        const titleText = line
+          .replace(/^\d+\s*[-–.)]\s*/, '')
+          .replace(/(?:^|\s)(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)(?=\s|$)/gi, ' ')
+          .replace(/\d+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (titleText.length >= 2) {
+          pendingProductTitle = {
+            text: titleText,
+            bbox: lineBoxes[idx] || null,
+          };
+        }
       }
       continue;
     }
@@ -632,6 +641,13 @@ export function parsePersianReceiptText(
     if (finalName.length < 2 && pendingProductTitle) {
       finalName = pendingProductTitle.text;
       itemBbox = pendingProductTitle.bbox || itemBbox;
+    }
+
+    // Do not silently drop a priced product row when OCR lost only its title; preserve the
+    // amount for review and make the missing name explicit instead of inventing a product.
+    const lineContainsItemUnit = /(?:^|\s)(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)(?=\s|$)/i.test(line);
+    if (finalName.length < 2 && !pendingProductTitle && rawItems.length > 0 && lineContainsItemUnit) {
+      finalName = `کالای نامشخص ${rawItems.length + 1}`;
     }
 
     pendingProductTitle = null;

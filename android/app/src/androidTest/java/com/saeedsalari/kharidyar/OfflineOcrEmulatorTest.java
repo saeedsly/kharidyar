@@ -299,6 +299,19 @@ public class OfflineOcrEmulatorTest {
         assertTrue("The OCR text did not include the final payable amount.", rawText.contains("4,799,000"));
         assertEquals("The long thermal receipt should parse all 48 products. Item names: " + itemNames +
             " OCR excerpt: " + rawText.substring(0, Math.min(1400, rawText.length())), 48, parsedItemCount);
+        String[] expectedNameFragments = {
+            "شیر", "پنیر", "تخم مرغ", "نان", "ماست", "چیپس", "روغن", "گوجه", "دوغ", "مرغ",
+            "برنج", "سیب", "چای", "قند", "ماکارونی", "رب گوجه", "زیتون", "آب", "نوشابه", "بیسکویت",
+            "شکلات", "دستمال", "مایع", "پودر", "کره", "خامه", "عدس", "لوبیا", "نخود", "تن ماهی",
+            "سس", "خیارشور", "عسل", "مربا", "قهوه", "آبمیوه", "موز", "پیاز", "لیمو", "شامپو",
+            "صابون", "بستنی", "پسته", "خرما"
+        };
+        int recognizedNameFragments = 0;
+        for (String fragment : expectedNameFragments) {
+            if (itemNames.contains(fragment)) recognizedNameFragments++;
+        }
+        assertTrue("Too many long-receipt product names were lost (" + recognizedNameFragments + "/" +
+            expectedNameFragments.length + "). Names: " + itemNames, recognizedNameFragments >= 36);
         assertEquals("The line-item prices differ from the 48-item thermal receipt fixture. OCR excerpt: " +
             rawText.substring(0, Math.min(1800, rawText.length())),
             "[98000,65000,115000,42000,78000,45000,89000,76000,58000,196000,650000,110000,145000,52000," +

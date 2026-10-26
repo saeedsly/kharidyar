@@ -244,10 +244,10 @@ public class OfflineOcrAssetsPlugin extends Plugin {
                 if (lowerText.contains(keyword)) receiptKeywordCount++;
             }
             return confidence * 2
-                + Math.min(80, lines.length() * 2)
-                + Math.min(60, text.length() / 10)
+                + Math.min(800, lines.length() * 4)
+                + Math.min(300, text.length() / 10)
                 + Math.min(1200, amountCount * 16)
-                + Math.min(160, persianLetterCount / 2)
+                + Math.min(1200, persianLetterCount * 2)
                 + receiptKeywordCount * 20;
         }
     }
@@ -264,15 +264,19 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         int amountCount = 0;
         while (amountMatcher.find()) amountCount++;
         boolean hasAmount = amountCount > 0;
-        boolean hasPersianText = PERSIAN_LETTER_PATTERN.matcher(result.text).find();
+        Matcher persianMatcher = PERSIAN_LETTER_PATTERN.matcher(result.text);
+        int persianLetterCount = 0;
+        while (persianMatcher.find()) persianLetterCount++;
+        boolean hasPersianText = persianLetterCount > 0;
         if (longReceipt) {
-            int minimumAmountCount = Math.max(4, Math.min(20, bitmap.getHeight() / 140));
+            int minimumAmountCount = Math.max(4, Math.min(36, bitmap.getHeight() / 80));
+            int minimumLineCount = Math.max(8, Math.min(40, bitmap.getHeight() / 70));
+            int minimumPersianLetterCount = Math.max(50, Math.min(300, bitmap.getHeight() / 10));
             return result.confidence < 52
-                || result.lines.length() < 8
+                || result.lines.length() < minimumLineCount
                 || textLength < 80
                 || amountCount < minimumAmountCount
-                || !hasPersianText;
-        }
+                || persianLetterCount < minimumPersianLetterCount;
         if (portraitReceipt) {
             int minimumCharacters = Math.max(70, Math.min(180, bitmap.getHeight() / 12));
             return result.confidence < 82
