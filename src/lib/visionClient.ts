@@ -246,6 +246,27 @@ function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob>
   });
 }
 
+function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    if (typeof canvas.toBlob === 'function') {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('IMAGE_COMPRESSION_FAILED'))),
+        'image/png'
+      );
+      return;
+    }
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      const binary = atob(dataUrl.slice(dataUrl.indexOf(',') + 1));
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      resolve(new Blob([bytes], { type: 'image/png' }));
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 export async function normalizeAndCompressReceiptPhoto(
   source: File | Blob | string
 ): Promise<{
@@ -358,9 +379,15 @@ export async function normalizeAndCompressReceiptPhoto(
         } catch {
           // No-op on older WebViews.
         }
-        const tileBlob = await canvasToJpeg(tileCanvas, 0.94);
-        const tileFile = new File([tileBlob], `receipt-part-${segments.length + 1}.jpg`, {
-          type: 'image/jpeg',
+        // Small Persian thermal glyphs are sensitive to JPEG ringing around thin strokes. Keep
+        // narrow receipt strips lossless for OCR; wider document scans remain compressed JPEGs.
+        const tileType = isNarrowThermalReceipt ? 'image/png' : 'image/jpeg';
+        const tileBlob = isNarrowThermalReceipt
+          ? await canvasToPng(tileCanvas)
+          : await canvasToJpeg(tileCanvas, 0.94);
+        const tileExtension = isNarrowThermalReceipt ? 'png' : 'jpg';
+        const tileFile = new File([tileBlob], `receipt-part-${segments.length + 1}.${tileExtension}`, {
+          type: tileType,
         });
         segments.push({ file: tileFile, width, height: tileHeight, top, fullHeight: height });
         if (top + tileHeight >= height) break;

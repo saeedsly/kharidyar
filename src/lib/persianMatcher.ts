@@ -445,6 +445,10 @@ export function parsePersianReceiptText(
   const explicitToman = /(تومان|تومن)/.test(fullText);
   const explicitRial = /(ریال|\bIRR\b|\bRials?\b)/i.test(fullText) && !explicitToman && !explicitLira;
   const currencyDetected = explicitLira || explicitToman || explicitRial;
+  const footerMarker = new RegExp(COLLAPSED_FOOTER_MARKER.source, COLLAPSED_FOOTER_MARKER.flags.replace(/g/g, ''));
+  const firstReceiptSummaryIndex = rawLines.findIndex(
+    (line) => footerMarker.test(line) && extractPricesFromText(line, explicitLira).length > 0
+  );
   const roundForCurrency = (amount: number) =>
     explicitLira ? Math.round(amount * 100) / 100 : Math.round(amount);
 
@@ -646,8 +650,11 @@ export function parsePersianReceiptText(
     // Do not silently drop a priced product row when OCR lost only its title; preserve the
     // amount for review and make the missing name explicit instead of inventing a product.
     const lineContainsItemUnit = /(?:^|\s)(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)(?=\s|$)/i.test(line);
+    const isBeforeReceiptSummary = firstReceiptSummaryIndex >= 0
+      ? idx < firstReceiptSummaryIndex
+      : idx < rawLines.length - 6;
     const hasUnlabeledRowShape =
-      lineContainsItemUnit || linePrices.length >= 2 || idx < rawLines.length - 6;
+      lineContainsItemUnit || linePrices.length >= 2 || isBeforeReceiptSummary;
     if (finalName.length < 2 && !pendingProductTitle && rawItems.length > 0 && hasUnlabeledRowShape) {
       finalName = `کالای نامشخص ${rawItems.length + 1}`;
     }

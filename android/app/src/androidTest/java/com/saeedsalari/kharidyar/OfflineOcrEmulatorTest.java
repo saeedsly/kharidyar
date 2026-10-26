@@ -298,7 +298,9 @@ public class OfflineOcrEmulatorTest {
         assertTrue("The OCR text did not include the receipt discount.", rawText.contains("47,000"));
         assertTrue("The OCR text did not include the final payable amount.", rawText.contains("4,799,000"));
         assertEquals("The long thermal receipt should parse all 48 products. Item names: " + itemNames +
-            " OCR excerpt: " + rawText.substring(0, Math.min(1400, rawText.length())), 48, parsedItemCount);
+            " Item totals: " + itemTotals + " Source subtotal: " + sourceSubtotal + " source total: " + sourceTotal +
+            " OCR head: " + rawText.substring(0, Math.min(700, rawText.length())) +
+            " OCR tail: " + rawText.substring(Math.max(0, rawText.length() - 1800)), 48, parsedItemCount);
         String[] expectedNameFragments = {
             "شیر", "پنیر", "تخم مرغ", "نان", "ماست", "چیپس", "روغن", "گوجه", "دوغ", "مرغ",
             "برنج", "سیب", "چای", "قند", "ماکارونی", "رب گوجه", "زیتون", "آب", "نوشابه", "بیسکویت",
