@@ -23,7 +23,7 @@ const LONG_THERMAL_TILE_HEIGHT = 1400;
 const MAX_RECEIPT_TILES = 8;
 const MAX_SCAN_TIME_MS = 90_000;
 const MAX_NATIVE_SCAN_TIME_MS = 180_000;
-const MAX_NATIVE_SCAN_TOTAL_MS = 540_000;
+const MAX_NATIVE_SCAN_TOTAL_MS = 720_000;
 const WORKER_IDLE_MS = 60_000;
 
 type PreparedOcrSegment = {
@@ -497,7 +497,7 @@ export async function runOnDeviceAutonomousScan(
     ? ocrSegments
     : [{ file: compressedFile, width, height, top: 0, fullHeight: height }];
   const scanTimeoutMs = isNativeAndroid
-    ? Math.min(MAX_NATIVE_SCAN_TOTAL_MS, MAX_NATIVE_SCAN_TIME_MS + Math.max(0, segments.length - 1) * 90_000)
+    ? Math.min(MAX_NATIVE_SCAN_TOTAL_MS, MAX_NATIVE_SCAN_TIME_MS + Math.max(0, segments.length - 1) * 180_000)
     : Math.min(240_000, MAX_SCAN_TIME_MS + Math.max(0, segments.length - 1) * 30_000);
   let cancelled = false;
   let rejectCancellation: ((error: Error) => void) | null = null;

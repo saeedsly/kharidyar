@@ -269,10 +269,10 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         while (persianMatcher.find()) persianLetterCount++;
         boolean hasPersianText = persianLetterCount > 0;
         if (longReceipt) {
-            int minimumAmountCount = Math.max(4, Math.min(36, bitmap.getHeight() / 80));
-            int minimumLineCount = Math.max(8, Math.min(40, bitmap.getHeight() / 70));
-            int minimumPersianLetterCount = Math.max(80, Math.min(300, bitmap.getHeight() / 6));
-            return result.confidence < 52
+            int minimumAmountCount = Math.max(4, Math.min(14, bitmap.getHeight() / 100));
+            int minimumLineCount = Math.max(6, Math.min(18, bitmap.getHeight() / 80));
+            int minimumPersianLetterCount = Math.max(32, Math.min(96, bitmap.getHeight() / 20));
+            return result.confidence < 45
                 || result.lines.length() < minimumLineCount
                 || textLength < 80
                 || amountCount < minimumAmountCount
