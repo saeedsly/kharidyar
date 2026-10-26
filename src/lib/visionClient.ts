@@ -551,6 +551,9 @@ export async function runOnDeviceAutonomousScan(
             width: segment.width,
             height: segment.height,
             longReceipt: segment.fullHeight > MAX_RECEIPT_EDGE,
+            receiptTail:
+              segment.fullHeight > MAX_RECEIPT_EDGE &&
+              segment.top + segment.height >= segment.fullHeight,
           });
           const recognized: NativeOcrResult = await Promise.race([
             withTimeout(nativeRecognition, remainingMs, () => {
