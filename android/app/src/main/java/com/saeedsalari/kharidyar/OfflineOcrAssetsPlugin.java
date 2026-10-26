@@ -271,7 +271,7 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         if (longReceipt) {
             int minimumAmountCount = Math.max(4, Math.min(36, bitmap.getHeight() / 80));
             int minimumLineCount = Math.max(8, Math.min(40, bitmap.getHeight() / 70));
-            int minimumPersianLetterCount = Math.max(50, Math.min(300, bitmap.getHeight() / 10));
+            int minimumPersianLetterCount = Math.max(80, Math.min(300, bitmap.getHeight() / 6));
             return result.confidence < 52
                 || result.lines.length() < minimumLineCount
                 || textLength < 80

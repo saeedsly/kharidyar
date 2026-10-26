@@ -646,7 +646,9 @@ export function parsePersianReceiptText(
     // Do not silently drop a priced product row when OCR lost only its title; preserve the
     // amount for review and make the missing name explicit instead of inventing a product.
     const lineContainsItemUnit = /(?:^|\s)(عدد|بسته|کیلوگرم|کیلو|گرم|بطری|شانه|سطل|کیسه|قوطی|لیتر|pcs?|pieces?|kg|kgs|g|gr|lit(?:er|re)s?|adet|paket|tane)(?=\s|$)/i.test(line);
-    if (finalName.length < 2 && !pendingProductTitle && rawItems.length > 0 && lineContainsItemUnit) {
+    const hasUnlabeledRowShape =
+      lineContainsItemUnit || linePrices.length >= 2 || idx < rawLines.length - 6;
+    if (finalName.length < 2 && !pendingProductTitle && rawItems.length > 0 && hasUnlabeledRowShape) {
       finalName = `کالای نامشخص ${rawItems.length + 1}`;
     }
 
