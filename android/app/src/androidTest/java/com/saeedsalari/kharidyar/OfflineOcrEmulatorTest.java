@@ -206,6 +206,13 @@ public class OfflineOcrEmulatorTest {
         }
     }
 
+    private static boolean isSystemDocumentPickerPackage(String packageName) {
+        // Android 7 emulator images can report the platform package instead of DocumentsUI.
+        return packageName != null && (
+            packageName.toLowerCase().contains("documentsui") || "android".equals(packageName)
+        );
+    }
+
     private static void verifySystemFilePicker(ActivityScenario<MainActivity> scenario) throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         UiDevice device = UiDevice.getInstance(instrumentation);
@@ -231,11 +238,11 @@ public class OfflineOcrEmulatorTest {
         String pickerPackage = "";
         while (SystemClock.elapsedRealtime() < pickerDeadline) {
             pickerPackage = device.getCurrentPackageName();
-            if (pickerPackage != null && pickerPackage.toLowerCase().contains("documentsui")) break;
+            if (isSystemDocumentPickerPackage(pickerPackage)) break;
             SystemClock.sleep(250);
         }
         if (pickerPackage == null) pickerPackage = "<unknown>";
-        if (!pickerPackage.toLowerCase().contains("documentsui")) {
+        if (!isSystemDocumentPickerPackage(pickerPackage)) {
             String appState = "<WebView unavailable>";
             try {
                 appState = evaluate(scenario, "document.body ? document.body.innerText : ''") +
