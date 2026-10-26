@@ -122,7 +122,11 @@ jobs:
                   message = f'Emulator test outcome: {outcome}. No JUnit failure details were produced.'
               if os.path.isfile('emulator-test.log'):
                   with open('emulator-test.log', encoding='utf-8', errors='replace') as log_file:
-                      log_tail = '\n'.join(log_file.read().splitlines()[-50:])
+                      log_lines = log_file.read().splitlines()
+                  exit_codes = [line.strip() for line in log_lines if line.startswith('ANDROID_TEST_GRADLE_EXIT_CODE=')]
+                  if exit_codes:
+                      message += ' ' + exit_codes[-1]
+                  log_tail = '\n'.join(log_lines[-30:])
                   if log_tail:
                       message += f' Gradle output: {log_tail}'
               if os.path.isfile('emulator-logcat.txt'):
@@ -130,7 +134,9 @@ jobs:
                       logcat_tail = '\n'.join(log_file.read().splitlines()[-30:])
                   if logcat_tail:
                       message += f' Android logcat: {logcat_tail}'
-              message = html.escape(message[:5000]).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              if len(message) > 5000:
+                  message = message[:1000] + '\n[log excerpt trimmed]\n' + message[-3900:]
+              message = html.escape(message).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
               print('::error title=Android 7 offline OCR::' + message)
               summary = '## Android 7 offline OCR emulator test — FAILED\n\n' + message + '\n'
           with open('emulator-summary.md', 'w', encoding='utf-8') as out:
