@@ -166,7 +166,105 @@ def render_receipt(
     return out_path
 
 
+def render_long_thermal_receipt(filename: str = "sample-thermal-long.png"):
+    """Create a narrow, dense thermal receipt fixture for long-receipt OCR regression tests."""
+    width = 576  # Common 80 mm thermal-printer raster width at 203 dpi.
+    rows = [
+        ("شیر کم چرب کاله", 2, 49000), ("پنیر سفید صباح", 1, 65000),
+        ("تخم مرغ تازه", 1, 115000), ("نان تست سبوس دار", 1, 42000),
+        ("ماست یونانی کاله", 1, 78000), ("چیپس سرکه ای مزمز", 1, 45000),
+        ("روغن مایع آفتابگردان", 1, 89000), ("گوجه فرنگی گلخانه ای", 2, 38000),
+        ("دوغ نعنایی آبعلی", 2, 29000), ("مرغ تازه پاک شده", 2, 98000),
+        ("برنج هاشمی درجه یک", 1, 650000), ("سیب درختی دماوند", 2, 55000),
+        ("چای سیاه ممتاز", 1, 145000), ("قند شکسته", 1, 52000),
+        ("ماکارونی زر ماکارون", 3, 27000), ("رب گوجه فرنگی", 2, 39000),
+        ("روغن زیتون فرابکر", 1, 210000), ("آب معدنی", 6, 9000),
+        ("نوشابه خانواده", 2, 32000), ("بیسکویت سبوس دار", 2, 24000),
+        ("شکلات تلخ", 1, 68000), ("دستمال کاغذی", 2, 56000),
+        ("مایع ظرفشویی", 1, 74000), ("پودر لباسشویی", 1, 132000),
+        ("پنیر خامه ای", 1, 59000), ("کره حیوانی", 2, 47000),
+        ("خامه صبحانه", 1, 36000), ("عدس بسته بندی", 2, 43000),
+        ("لوبیا چیتی", 1, 94000), ("نخود ایرانی", 1, 51000),
+        ("تن ماهی", 2, 78000), ("سس مایونز", 1, 64000),
+        ("خیارشور ویژه", 1, 83000), ("عسل طبیعی", 1, 185000),
+        ("مربای توت فرنگی", 1, 72000), ("قهوه فوری", 1, 115000),
+        ("آبمیوه پرتقال", 2, 28000), ("موز تازه", 2, 69000),
+        ("سیب زمینی", 2, 26000), ("پیاز زرد", 1, 18000),
+        ("لیمو ترش", 1, 44000), ("شامپو روزانه", 1, 99000),
+        ("صابون بهداشتی", 3, 17000), ("بستنی وانیلی", 2, 39000),
+        ("نان لواش", 2, 12000), ("پنیر پیتزا", 1, 138000),
+        ("پسته خام", 1, 225000), ("خرما مضافتی", 1, 88000),
+    ]
+    pad = 20
+    header_h = 250
+    row_h = 56
+    footer_h = 290
+    paper = Image.new("RGB", (width, header_h + len(rows) * row_h + footer_h), (250, 249, 245))
+    draw = ImageDraw.Draw(paper)
+    regular = ImageFont.truetype(FONT_REG_PATH, 17)
+    medium = ImageFont.truetype(FONT_MED_PATH, 17)
+    bold = ImageFont.truetype(FONT_BOLD_PATH, 18)
+    small = ImageFont.truetype(FONT_REG_PATH, 15)
+    ink = (48, 48, 46)
+    faint = (86, 86, 82)
+
+    def right_text(text: str, y: int, font, fill=ink, right: int = width - pad):
+        display = fa(text)
+        draw.text((right - draw.textlength(display, font=font), y), display, font=font, fill=fill)
+
+    y = 16
+    right_text("فروشگاه زنجیره ای بهار", y, bold, right=width - pad)
+    y += 28
+    right_text("شعبه بلوار فردوس - صندوق ۲", y, small, faint)
+    y += 24
+    draw.text((pad, y), "1405/08/04", font=small, fill=faint)
+    right_text("شماره فاکتور: TH-804231", y, small, faint)
+    y += 25
+    draw.line((pad, y, width - pad, y), fill=(120, 120, 116), width=1)
+    y += 10
+    right_text("شرح کالا", y, small, faint)
+    y += 22
+
+    subtotal = 0
+    for index, (name, quantity, unit_price) in enumerate(rows, start=1):
+        total = quantity * unit_price
+        subtotal += total
+        right_text(name, y, medium)
+        y += 22
+        draw.text((pad, y), f"{quantity} عدد  {unit_price:,}  {total:,}", font=regular, fill=ink)
+        y += 23
+        if index % 4 == 0:
+            draw.line((pad, y + 1, width - pad, y + 1), fill=(228, 226, 220), width=1)
+        y += 9
+
+    discount = 47000
+    grand_total = subtotal - discount
+    y += 5
+    draw.line((pad, y, width - pad, y), fill=(100, 100, 96), width=2)
+    y += 13
+    right_text("جمع اقلام (تومان):", y, small, faint)
+    draw.text((pad, y), f"{subtotal:,}", font=regular, fill=faint)
+    y += 24
+    right_text("تخفیف خرید (تومان):", y, small, faint)
+    draw.text((pad, y), f"{discount:,}", font=regular, fill=faint)
+    y += 25
+    right_text("مالیات:", y, small, faint)
+    draw.text((pad, y), "0", font=regular, fill=faint)
+    y += 27
+    right_text("مبلغ قابل پرداخت (تومان):", y, bold)
+    draw.text((pad, y), f"{grand_total:,}", font=bold, fill=ink)
+    y += 32
+    right_text("از خرید شما سپاسگزاریم", y, small, faint)
+
+    # Emulate a lightly faded thermal print without reducing the small glyph details.
+    paper = paper.filter(ImageFilter.GaussianBlur(radius=0.12))
+    out_path = os.path.join(SAMPLES_DIR, filename)
+    paper.save(out_path, "PNG", optimize=True)
+    return out_path
+
+
 def generate_app_icons():
+
     """Creates sleek minimal Apple-style KharidYar app icon PNGs for PWA + Native Android APK."""
     size = 512
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -247,5 +345,6 @@ if __name__ == "__main__":
         ],
         discount_total=46000,
     )
+    p4 = render_long_thermal_receipt()
     generate_app_icons()
-    print("Generated sample receipts & icons:", p1, p2, p3)
+    print("Generated sample receipts & icons:", p1, p2, p3, p4)

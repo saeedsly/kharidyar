@@ -1,5 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { LockKeyhole, ShieldCheck, Trash2, X } from 'lucide-react';
+import { ExternalLink, Linkedin, LockKeyhole, ShieldCheck, Trash2, X } from 'lucide-react';
+
+const OWNER_LINKEDIN_URL = 'https://www.linkedin.com/in/saeed-salariy/';
 import { assetUrl } from '../lib/assetUrl';
 
 interface PrivacyModalProps {
@@ -61,6 +63,31 @@ export function PrivacyModal({ isOpen, onClose, onClearAllUserData }: PrivacyMod
               >
                 سیاست حریم خصوصی
               </a>
+            </div>
+
+            <div className="rounded-2xl bg-white p-4 border border-slate-200/80">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-extrabold text-slate-900">سعید سالاری</p>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                    سازنده و صاحب اثر خریدیـار · کلیهٔ حقوق مادی و معنوی محفوظ است.
+                  </p>
+                </div>
+                <a
+                  href={OWNER_LINKEDIN_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="پروفایل لینکدین سعید سالاری"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-100"
+                >
+                  <Linkedin className="h-3.5 w-3.5" />
+                  لینکدین
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+              <p dir="ltr" className="mt-3 border-t border-slate-100 pt-2 text-center text-[10px] text-slate-400">
+                © 2026 Saeed Salari. All rights reserved.
+              </p>
             </div>
 
             <button

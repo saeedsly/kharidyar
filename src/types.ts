@@ -34,8 +34,13 @@ export interface Receipt {
   tax_total: number;
   total_amount: number;
   currency: string;
+  currency_detected?: boolean;
+  detected_rial?: boolean;
   ocr_engine: string;
   ocr_confidence: number;
+  amount_read_from_receipt?: boolean;
+  subtotal_read_from_receipt?: boolean;
+  discount_inferred?: boolean;
   raw_ocr_text?: string;
   image_url?: string | null;
   processed_image_url?: string | null;
@@ -92,6 +97,13 @@ export interface ScanResponse {
   perspectiveCropped?: boolean;
   lineBoxes: BoundingBox[];
   rawOcrText: string;
+  ocrQuality?: {
+    itemCount: number;
+    amountReadFromReceipt: boolean;
+    subtotalReadFromReceipt: boolean;
+    itemTotalsMatchSubtotal: boolean;
+    payableMatchesItems: boolean;
+  };
   receipt: Omit<Receipt, 'id'> & { items: ReceiptItem[] };
   reconciliation: {
     matchedCount: number;

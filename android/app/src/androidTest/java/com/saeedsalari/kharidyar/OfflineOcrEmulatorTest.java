@@ -25,7 +25,7 @@ import static org.junit.Assert.fail;
 @RunWith(AndroidJUnit4.class)
 public class OfflineOcrEmulatorTest {
     private static final long APP_READY_TIMEOUT_MS = 30_000;
-    private static final long OCR_TIMEOUT_MS = 195_000;
+    private static final long OCR_TIMEOUT_MS = 300_000;
 
     @Test
     public void bundledReceiptOcrCompletesOfflineOnAndroid7() throws Exception {
@@ -155,6 +155,14 @@ public class OfflineOcrEmulatorTest {
                         "(function() { var node = document.querySelector('[data-testid=\"receipt-subtotal\"]'); " +
                         "return node ? node.getAttribute('data-amount') || '' : ''; })()"
                     );
+                    String sourceSubtotal = evaluate(scenario,
+                        "(function() { var node = document.querySelector('[data-testid=\"ocr-source-subtotal\"]'); " +
+                        "return node ? node.getAttribute('data-amount') || '' : ''; })()"
+                    );
+                    String sourcePayableTotal = evaluate(scenario,
+                        "(function() { var node = document.querySelector('[data-testid=\"ocr-source-total\"]'); " +
+                        "return node ? node.getAttribute('data-amount') || '' : ''; })()"
+                    );
                     String parsedDiscount = evaluate(scenario,
                         "(function() { var node = document.querySelector('[data-testid=\"receipt-discount\"]'); " +
                         "return node ? node.value || '' : ''; })()"
@@ -181,9 +189,13 @@ public class OfflineOcrEmulatorTest {
                     assertTrue("OCR did not preserve the sample payable amount.", rawOcrText.contains("420,000"));
                     assertEquals("The item prices were parsed incorrectly. OCR: " + rawOcrText,
                         "[98000,65000,115000,42000,78000,45000]", parsedItemTotals);
-                    assertEquals("The subtotal was parsed incorrectly. OCR: " + rawOcrText +
+                    assertEquals("The editable item subtotal was parsed incorrectly. OCR: " + rawOcrText +
                         " Parsed item totals: " + parsedItemTotals + " Review state: " + reviewDetails,
                         "443000", parsedSubtotal);
+                    assertEquals("The OCR source subtotal was not preserved. OCR: " + rawOcrText,
+                        "443000", sourceSubtotal);
+                    assertEquals("The OCR source payable total was not preserved. OCR: " + rawOcrText,
+                        "420000", sourcePayableTotal);
                     assertEquals("The discount was parsed incorrectly. OCR: " + rawOcrText +
                         " Parsed subtotal: " + parsedSubtotal + " item totals: " + parsedItemTotals +
                         " Review state: " + reviewDetails, "23000", parsedDiscount);
@@ -192,6 +204,7 @@ public class OfflineOcrEmulatorTest {
                     System.out.println("OFFLINE_OCR_EMULATOR_PASS: sample receipt produced " + rawOcrText.length() +
                         " OCR characters across " + recognizedLines + " lines and parsed " + parsedItemCount + " items. Names: " + itemNames +
                         ". Discount: " + parsedDiscount + ". Payable total: " + parsedPayableTotal);
+                    verifyLongThermalReceipt(scenario);
                     return;
                 }
                 if (lastBody.contains("خواندن فاکتور در زمان مجاز تمام نشد")) {
@@ -204,6 +217,103 @@ public class OfflineOcrEmulatorTest {
             }
             fail("OFFLINE_OCR_EMULATOR_TIMEOUT: OCR did not reach review within the configured app timeout. Last progress: " + lastOcrProgress + " Last UI: " + lastBody + " Errors: " + getPageErrors(scenario) + " Console: " + browserConsole.get());
         }
+    }
+
+    private static void verifyLongThermalReceipt(ActivityScenario<MainActivity> scenario) throws Exception {
+        String rescanClick = evaluate(scenario,
+            "(() => { const button = document.querySelector('[data-testid=\\\"receipt-rescan\\\"]'); " +
+            "if (!button) return 'rescan-button-not-found'; button.click(); return 'capture-opened'; })()"
+        );
+        assertEquals("The scanner could not return to its sample list.", "capture-opened", rescanClick);
+
+        long sampleButtonDeadline = SystemClock.elapsedRealtime() + 10_000;
+        String sampleClick = "sample-button-not-found";
+        while (SystemClock.elapsedRealtime() < sampleButtonDeadline && !"long-sample-started".equals(sampleClick)) {
+            sampleClick = evaluate(scenario,
+                "(() => { const button = document.querySelector('[data-testid=\\\"receipt-sample-thermal-long\\\"]'); " +
+                "if (!button) return 'sample-button-not-found'; button.click(); return 'long-sample-started'; })()"
+            );
+            if (!"long-sample-started".equals(sampleClick)) SystemClock.sleep(250);
+        }
+        assertEquals("The 48-item thermal receipt sample was not available.", "long-sample-started", sampleClick);
+
+        long deadline = SystemClock.elapsedRealtime() + OCR_TIMEOUT_MS;
+        String body = "";
+        String lastProgress = "<no progress reported>";
+        while (SystemClock.elapsedRealtime() < deadline) {
+            body = evaluate(scenario, "document.body ? document.body.innerText : ''");
+            lastProgress = evaluate(scenario,
+                "JSON.stringify({progress: window.__emulatorOcrProgress || null, worker: window.__emulatorOcrWorkerStatus || null})"
+            );
+            if (body.contains("اطمینان خوانش:")) break;
+            if (body.contains("خواندن فاکتور در زمان مجاز تمام نشد") ||
+                body.contains("خواندن فاکتور ناموفق بود") || body.contains("قابل خواندن نیست")) {
+                fail("OFFLINE_OCR_LONG_RECEIPT_ERROR: long thermal OCR failed. Progress: " + lastProgress +
+                    " UI: " + body + " Errors: " + getPageErrors(scenario));
+            }
+            SystemClock.sleep(750);
+        }
+        assertTrue("OFFLINE_OCR_LONG_RECEIPT_TIMEOUT: the 48-item receipt did not reach review. Progress: " +
+            lastProgress + " UI: " + body + " Errors: " + getPageErrors(scenario), body.contains("اطمینان خوانش:"));
+
+        String rawButton = evaluate(scenario,
+            "(() => { const button = Array.from(document.querySelectorAll('button')) " +
+            ".find(element => (element.innerText || '').includes('متن خام OCR')); " +
+            "if (!button) return 'raw-text-button-not-found'; button.click(); return 'raw-text-opened'; })()"
+        );
+        assertEquals("Raw OCR text could not be opened for the long thermal sample.", "raw-text-opened", rawButton);
+        String rawText = evaluate(scenario,
+            "(() => { const node = document.querySelector('div.font-mono'); return node ? node.textContent || '' : ''; })()"
+        );
+        String itemNames = evaluate(scenario,
+            "JSON.stringify(Array.from(document.querySelectorAll('[data-testid=\\\"receipt-item-name\\\"]')).map(input => input.value))"
+        );
+        String itemTotals = evaluate(scenario,
+            "JSON.stringify(Array.from(document.querySelectorAll('[data-testid=\\\"receipt-item-total\\\"]')) " +
+            ".map(element => Number(element.getAttribute('data-amount'))))"
+        );
+        String sourceSubtotal = evaluate(scenario,
+            "(function() { var node = document.querySelector('[data-testid=\\\"ocr-source-subtotal\\\"]'); " +
+            "return node ? node.getAttribute('data-amount') || '' : ''; })()"
+        );
+        String sourceTotal = evaluate(scenario,
+            "(function() { var node = document.querySelector('[data-testid=\\\"ocr-source-total\\\"]'); " +
+            "return node ? node.getAttribute('data-amount') || '' : ''; })()"
+        );
+        String discount = evaluate(scenario,
+            "(function() { var node = document.querySelector('[data-testid=\\\"receipt-discount\\\"]'); " +
+            "return node ? node.value || '' : ''; })()"
+        );
+        String payable = evaluate(scenario,
+            "(function() { var node = document.querySelector('[data-testid=\\\"receipt-payable-total\\\"]'); " +
+            "return node ? node.getAttribute('data-amount') || '' : ''; })()"
+        );
+        int parsedItemCount = Integer.parseInt(evaluate(scenario,
+            "String(document.querySelectorAll('[data-testid=\\\"receipt-item-name\\\"]').length)"
+        ));
+
+        assertTrue("The long receipt produced too little raw OCR text (" + rawText.length() + " chars).",
+            rawText.length() >= 1500);
+        assertTrue("The OCR text did not include the 48-item receipt's subtotal.", rawText.contains("4,846,000"));
+        assertTrue("The OCR text did not include the receipt discount.", rawText.contains("47,000"));
+        assertTrue("The OCR text did not include the final payable amount.", rawText.contains("4,799,000"));
+        assertEquals("The long thermal receipt should parse all 48 products. Item names: " + itemNames +
+            " OCR excerpt: " + rawText.substring(0, Math.min(1400, rawText.length())), 48, parsedItemCount);
+        assertEquals("The line-item prices differ from the 48-item thermal receipt fixture. OCR excerpt: " +
+            rawText.substring(0, Math.min(1800, rawText.length())),
+            "[98000,65000,115000,42000,78000,45000,89000,76000,58000,196000,650000,110000,145000,52000," +
+            "81000,78000,210000,54000,64000,48000,68000,112000,74000,132000,59000,94000,36000,86000," +
+            "94000,51000,156000,64000,83000,185000,72000,115000,56000,138000,52000,18000,44000,99000," +
+            "51000,78000,24000,138000,225000,88000]",
+            itemTotals);
+        assertEquals("The printed subtotal was not extracted.", "4846000", sourceSubtotal);
+        assertEquals("The printed final payable amount was not extracted.", "4799000", sourceTotal);
+        assertEquals("The printed discount was not extracted.", "47000", discount);
+        assertEquals("The payable total calculated from parsed items is wrong.", "4799000", payable);
+        assertTrue("The review panel should identify the final amount as read from the receipt.",
+            body.contains("مبلغ پرداختی خوانده‌شده"));
+        System.out.println("OFFLINE_OCR_LONG_THERMAL_PASS: parsed 48/48 items; subtotal=" + sourceSubtotal +
+            ", discount=" + discount + ", payable=" + sourceTotal + ". Names: " + itemNames);
     }
 
     private static boolean isSystemDocumentPickerPackage(String packageName) {

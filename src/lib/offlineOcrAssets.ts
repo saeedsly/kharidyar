@@ -24,6 +24,7 @@ interface OfflineOcrAssetsPlugin {
     language: string;
     width: number;
     height: number;
+    longReceipt?: boolean;
   }): Promise<NativeOcrResult>;
   cancelRecognition(): Promise<void>;
   addListener(

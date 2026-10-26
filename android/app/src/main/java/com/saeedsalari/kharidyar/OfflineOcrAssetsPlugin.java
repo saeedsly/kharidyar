@@ -26,6 +26,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -40,6 +42,10 @@ public class OfflineOcrAssetsPlugin extends Plugin {
     private static final int MAX_IMAGE_EDGE = 5000;
     private static final long MAX_PICKED_IMAGE_BYTES = 40L * 1024L * 1024L;
     private static final int COPY_BUFFER_BYTES = 64 * 1024;
+    private static final Pattern RECEIPT_AMOUNT_PATTERN = Pattern.compile(
+        "(?<![0-9۰-۹٠-٩])(?:[0-9۰-۹٠-٩]{1,3}(?:[,،.][0-9۰-۹٠-٩]{3})+|[0-9۰-۹٠-٩]{4,10})(?![0-9۰-۹٠-٩])"
+    );
+    private static final Pattern PERSIAN_LETTER_PATTERN = Pattern.compile("[\\u0600-\\u06FF]");
 
     private final ExecutorService ocrExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
@@ -173,6 +179,7 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         String language = call.getString("language");
         Integer width = call.getInt("width");
         Integer height = call.getInt("height");
+        boolean longReceipt = Boolean.TRUE.equals(call.getBoolean("longReceipt", false));
 
         if (!("fas+eng".equals(language) || "tur+eng".equals(language))) {
             call.reject("Unsupported offline OCR language.");
@@ -192,7 +199,7 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         }
 
         try {
-            ocrExecutor.execute(() -> performRecognition(call, imageBase64, language, width, height));
+            ocrExecutor.execute(() -> performRecognition(call, imageBase64, language, width, height, longReceipt));
         } catch (RejectedExecutionException error) {
             scanRunning.set(false);
             call.reject("The offline OCR engine is shutting down.", error);
@@ -224,27 +231,51 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         }
 
         int score() {
-            return confidence * 2 + Math.min(60, lines.length() * 3) + Math.min(40, text.length() / 12);
+            int amountCount = 0;
+            Matcher amountMatcher = RECEIPT_AMOUNT_PATTERN.matcher(text);
+            while (amountMatcher.find()) amountCount++;
+            int persianLetterCount = 0;
+            Matcher persianMatcher = PERSIAN_LETTER_PATTERN.matcher(text);
+            while (persianMatcher.find()) persianLetterCount++;
+            String lowerText = text.toLowerCase(Locale.ROOT);
+            int receiptKeywordCount = 0;
+            for (String keyword : new String[] { "جمع", "پرداخت", "تخفیف", "مالیات", "total", "amount", "discount", "tax" }) {
+                if (lowerText.contains(keyword)) receiptKeywordCount++;
+            }
+            return confidence * 2
+                + Math.min(80, lines.length() * 2)
+                + Math.min(60, text.length() / 10)
+                + Math.min(1200, amountCount * 16)
+                + Math.min(160, persianLetterCount / 2)
+                + receiptKeywordCount * 20;
         }
     }
 
     private RecognitionPass recognizeWithPageSegMode(TessBaseAPI api, Bitmap bitmap, int pageSegMode) {
         api.setPageSegMode(pageSegMode);
         api.setImage(bitmap);
-        api.getHOCRText(0);
         return new RecognitionPass(api.getUTF8Text(), api.meanConfidence(), extractTextLines(api));
     }
 
     private boolean shouldRetryRecognition(RecognitionPass result, Bitmap bitmap, boolean portraitReceipt) {
         int textLength = result.text.trim().length();
+        boolean hasAmount = RECEIPT_AMOUNT_PATTERN.matcher(result.text).find();
+        boolean hasPersianText = PERSIAN_LETTER_PATTERN.matcher(result.text).find();
         if (portraitReceipt) {
-            int minimumCharacters = Math.max(80, Math.min(200, bitmap.getHeight() / 10));
-            return result.confidence < 75 || result.lines.length() < 10 || textLength < minimumCharacters;
+            int minimumCharacters = Math.max(70, Math.min(180, bitmap.getHeight() / 12));
+            return result.confidence < 82
+                || result.lines.length() < 10
+                || textLength < minimumCharacters
+                || !hasAmount
+                || !hasPersianText;
         }
-        return result.confidence < 60 || result.lines.length() < 8 || textLength < 80;
+        return result.confidence < 70
+            || result.lines.length() < 8
+            || textLength < 80
+            || !hasAmount;
     }
 
-    private void performRecognition(PluginCall call, String imageBase64, String language, int expectedWidth, int expectedHeight) {
+    private void performRecognition(PluginCall call, String imageBase64, String language, int expectedWidth, int expectedHeight, boolean longReceipt) {
         Bitmap bitmap = null;
         TessBaseAPI api = null;
         try {
@@ -264,15 +295,16 @@ public class OfflineOcrAssetsPlugin extends Plugin {
                 ? TessBaseAPI.PageSegMode.PSM_SINGLE_COLUMN
                 : TessBaseAPI.PageSegMode.PSM_AUTO;
             int alternateMode = portraitReceipt
-                ? TessBaseAPI.PageSegMode.PSM_AUTO
+                ? TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK
                 : TessBaseAPI.PageSegMode.PSM_SINGLE_COLUMN;
 
-            sendProgress("در حال خواندن متن فاکتور با موتور بومی...", 0);
-            // A long receipt is usually one text column. If the first layout is sparse or weak,
-            // retry once with the alternate segmentation mode and keep the stronger result.
+            sendProgress("در حال خواندن متن و رقم‌های فاکتور با موتور بومی...", 0);
+            // Long thermal receipts are scanned with two independent layout assumptions even
+            // when the first pass looks confident; confidence alone often hides missed totals.
             RecognitionPass bestPass = recognizeWithPageSegMode(api, bitmap, primaryMode);
-            if (shouldRetryRecognition(bestPass, bitmap, portraitReceipt)) {
-                sendProgress("در حال بررسی دوبارهٔ متن فاکتور...", 0);
+            boolean longThermalLayout = portraitReceipt && bitmap.getHeight() > bitmap.getWidth() * 2.3f;
+            if (longReceipt || longThermalLayout || shouldRetryRecognition(bestPass, bitmap, portraitReceipt)) {
+                sendProgress("در حال بازبینی دوبارهٔ خطوط و رقم‌های فاکتور...", 0);
                 RecognitionPass alternatePass = recognizeWithPageSegMode(api, bitmap, alternateMode);
                 if (alternatePass.score() > bestPass.score()) bestPass = alternatePass;
             }

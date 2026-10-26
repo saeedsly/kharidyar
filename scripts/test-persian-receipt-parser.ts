@@ -65,6 +65,48 @@ assert.equal(thermalReceiptResult.subtotal, 443_000);
 assert.equal(thermalReceiptResult.discount_total, 23_000);
 assert.equal(thermalReceiptResult.total_amount, 420_000);
 
+const twoLineThermalReceipt = parsePersianReceiptText([
+  'فروشگاه نمونه',
+  'شیر کم چرب کاله',
+  '2 عدد 490,000 980,000',
+  'چای سیاه ممتاز',
+  '1 عدد 145 000 145 000',
+  'جمع کل اقلام: 1 125 000',
+  'تخفیف خرید: 25,000',
+  'مبلغ قابل پرداخت: 1,100,000',
+]);
+assert.equal(twoLineThermalReceipt.items.length, 2);
+assert.deepEqual(twoLineThermalReceipt.items.map(({ quantity, total_price }) => ({ quantity, total_price })), [
+  { quantity: 2, total_price: 980_000 },
+  { quantity: 1, total_price: 145_000 },
+]);
+assert.equal(twoLineThermalReceipt.subtotal, 1_125_000);
+assert.equal(twoLineThermalReceipt.discount_total, 25_000);
+assert.equal(twoLineThermalReceipt.total_amount, 1_100_000);
+assert.equal(twoLineThermalReceipt.amount_read_from_receipt, true);
+
+const largeTomanReceipt = parsePersianReceiptText([
+  'فروشگاه نمونه',
+  'برنج هاشمی',
+  '1 عدد 650,000 650,000',
+  'جمع کل اقلام: 650,000',
+  'مبلغ قابل پرداخت: 650,000',
+]);
+assert.equal(largeTomanReceipt.total_amount, 650_000, 'Do not guess Rial from a large price alone.');
+assert.equal(largeTomanReceipt.detected_rial, false);
+assert.equal(largeTomanReceipt.currency_detected, false);
+
+const explicitRialReceipt = parsePersianReceiptText([
+  'فروشگاه نمونه',
+  'برنج هاشمی (ریال)',
+  '1 عدد 6,500,000 6,500,000',
+  'جمع کل اقلام: 6,500,000 ریال',
+  'مبلغ قابل پرداخت: 6,500,000 ریال',
+]);
+assert.equal(explicitRialReceipt.total_amount, 650_000);
+assert.equal(explicitRialReceipt.detected_rial, true);
+assert.equal(explicitRialReceipt.currency_detected, true);
+
 console.log(
-  'PASS: collapsed Persian receipt text, with numbered or unnumbered items and with or without column headings, restored to six correctly priced items.'
+  'PASS: collapsed and two-line Persian thermal receipts, spaced thousands, final totals, and explicit-only Rial conversion.'
 );

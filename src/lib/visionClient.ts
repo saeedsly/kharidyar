@@ -4,6 +4,7 @@ import type { BoundingBox, ScanResponse, ShoppingItem } from '../types';
 import { assetUrl } from './assetUrl';
 import { OfflineOcrAssets, type NativeOcrResult } from './offlineOcrAssets';
 import {
+  normalizePersianText,
   parsePersianReceiptText,
   reconcileReceiptWithShoppingList,
   recoverCollapsedReceiptLines,
@@ -16,9 +17,21 @@ const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
   'tr-en': 'tur+eng',
 };
 const MAX_RECEIPT_EDGE = 2800;
-const MAX_SCAN_TIME_MS = 60_000;
+const LONG_RECEIPT_MIN_EDGE = 2400;
+const RECEIPT_TILE_OVERLAP = 160;
+const MAX_RECEIPT_TILES = 8;
+const MAX_SCAN_TIME_MS = 90_000;
 const MAX_NATIVE_SCAN_TIME_MS = 180_000;
+const MAX_NATIVE_SCAN_TOTAL_MS = 540_000;
 const WORKER_IDLE_MS = 60_000;
+
+type PreparedOcrSegment = {
+  file: File;
+  width: number;
+  height: number;
+  top: number;
+  fullHeight: number;
+};
 const WASM_BASELINE_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
 const WASM_SIMD_PROBE = new Uint8Array([
   0, 97, 115, 109, 1, 0, 0, 0,
@@ -234,7 +247,14 @@ function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob>
 
 export async function normalizeAndCompressReceiptPhoto(
   source: File | Blob | string
-): Promise<{ compressedFile: File; previewUrl: string; width: number; height: number; sizeBytes: number }> {
+): Promise<{
+  compressedFile: File;
+  previewUrl: string;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  ocrSegments: PreparedOcrSegment[];
+}> {
   let rawObjectUrl = '';
   const srcUrl =
     typeof source === 'string'
@@ -253,35 +273,105 @@ export async function normalizeAndCompressReceiptPhoto(
     const sourceHeight = image.naturalHeight || image.height;
     if (!sourceWidth || !sourceHeight) throw new Error('تصویر فاکتور ابعاد معتبری ندارد.');
 
-    const scale = Math.min(1, MAX_RECEIPT_EDGE / Math.max(sourceWidth, sourceHeight));
-    const width = Math.max(1, Math.round(sourceWidth * scale));
-    const height = Math.max(1, Math.round(sourceHeight * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d', { alpha: false });
-    if (!context) throw new Error('مرورگر گوشی نتوانست تصویر را آماده کند.');
+    const previewScale = Math.min(1, MAX_RECEIPT_EDGE / Math.max(sourceWidth, sourceHeight));
+    const previewWidth = Math.max(1, Math.round(sourceWidth * previewScale));
+    const previewHeight = Math.max(1, Math.round(sourceHeight * previewScale));
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = previewWidth;
+    previewCanvas.height = previewHeight;
+    const previewContext = previewCanvas.getContext('2d', { alpha: false });
+    if (!previewContext) throw new Error('مرورگر گوشی نتوانست تصویر را آماده کند.');
 
-    context.fillStyle = '#fff';
-    context.fillRect(0, 0, width, height);
-    // Use the browser's native canvas filter when available. This avoids the slow full-image
-    // JavaScript pixel loops that used to freeze older Android WebViews.
+    previewContext.fillStyle = '#fff';
+    previewContext.fillRect(0, 0, previewWidth, previewHeight);
     try {
-      context.filter = 'grayscale(1) contrast(1.12)';
+      previewContext.filter = 'grayscale(1) contrast(1.14)';
     } catch {
-      // Older WebViews can ignore canvas filters; a clean resized JPEG still works for OCR.
+      // Older WebViews can ignore canvas filters; the resized image is still usable.
     }
-    context.drawImage(image, 0, 0, width, height);
+    previewContext.drawImage(image, 0, 0, previewWidth, previewHeight);
     try {
-      context.filter = 'none';
+      previewContext.filter = 'none';
     } catch {
       // No-op on older WebViews.
     }
 
-    const blob = await canvasToJpeg(canvas, 0.92);
-    const compressedFile = new File([blob], `receipt-${Date.now()}.jpg`, { type: 'image/jpeg' });
-    const previewUrl = URL.createObjectURL(blob);
-    return { compressedFile, previewUrl, width, height, sizeBytes: blob.size };
+    const previewBlob = await canvasToJpeg(previewCanvas, 0.92);
+    const compressedFile = new File([previewBlob], `receipt-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    const previewUrl = URL.createObjectURL(previewBlob);
+
+    // Do not shrink a long thermal receipt to a single 2,800-pixel image. That used to turn
+    // fine print into a few unreadable pixels. Keep the original print resolution and OCR
+    // overlapping strips; the overlap prevents a row at a strip boundary from being cut in half.
+    const isLongReceipt =
+      sourceHeight >= LONG_RECEIPT_MIN_EDGE && sourceHeight / sourceWidth >= 1.3;
+    const ocrScale = isLongReceipt
+      ? Math.min(1, MAX_RECEIPT_EDGE / sourceWidth)
+      : previewScale;
+    const width = Math.max(1, Math.round(sourceWidth * ocrScale));
+    const height = Math.max(1, Math.round(sourceHeight * ocrScale));
+    const segments: PreparedOcrSegment[] = [];
+
+    if (!isLongReceipt || height <= MAX_RECEIPT_EDGE) {
+      segments.push({ file: compressedFile, width, height, top: 0, fullHeight: height });
+    } else {
+      const stride = MAX_RECEIPT_EDGE - RECEIPT_TILE_OVERLAP;
+      const segmentCount = Math.ceil((height - RECEIPT_TILE_OVERLAP) / stride);
+      if (segmentCount > MAX_RECEIPT_TILES) {
+        URL.revokeObjectURL(previewUrl);
+        throw new Error('فاکتور بیش از حد بلند است؛ لطفاً آن را در دو عکسِ هم‌پوشان اسکن کن.');
+      }
+
+      for (let top = 0; top < height; top += stride) {
+        const tileHeight = Math.min(MAX_RECEIPT_EDGE, height - top);
+        const tileCanvas = document.createElement('canvas');
+        tileCanvas.width = width;
+        tileCanvas.height = tileHeight;
+        const tileContext = tileCanvas.getContext('2d', { alpha: false });
+        if (!tileContext) {
+          URL.revokeObjectURL(previewUrl);
+          throw new Error('گوشی نتوانست بخش‌های فاکتور را برای خواندن آماده کند.');
+        }
+        tileContext.fillStyle = '#fff';
+        tileContext.fillRect(0, 0, width, tileHeight);
+        try {
+          tileContext.filter = 'grayscale(1) contrast(1.14)';
+        } catch {
+          // Older WebViews can ignore canvas filters.
+        }
+        tileContext.drawImage(
+          image,
+          0,
+          top / ocrScale,
+          sourceWidth,
+          tileHeight / ocrScale,
+          0,
+          0,
+          width,
+          tileHeight
+        );
+        try {
+          tileContext.filter = 'none';
+        } catch {
+          // No-op on older WebViews.
+        }
+        const tileBlob = await canvasToJpeg(tileCanvas, 0.94);
+        const tileFile = new File([tileBlob], `receipt-part-${segments.length + 1}.jpg`, {
+          type: 'image/jpeg',
+        });
+        segments.push({ file: tileFile, width, height: tileHeight, top, fullHeight: height });
+        if (top + tileHeight >= height) break;
+      }
+    }
+
+    return {
+      compressedFile,
+      previewUrl,
+      width,
+      height,
+      sizeBytes: segments.reduce((total, segment) => total + segment.file.size, 0),
+      ocrSegments: segments,
+    };
   } finally {
     if (rawObjectUrl) URL.revokeObjectURL(rawObjectUrl);
   }
@@ -329,6 +419,65 @@ function flattenOcrLines(data: Awaited<ReturnType<OcrWorker['recognize']>>['data
     }));
 }
 
+function mapSegmentLine(line: OcrLineData, segment: PreparedOcrSegment): OcrLineData {
+  return {
+    ...line,
+    text: line.text.trim(),
+    bbox: {
+      x0: line.bbox.x0,
+      y0: segment.top + line.bbox.y0,
+      x1: line.bbox.x1,
+      y1: segment.top + line.bbox.y1,
+    },
+  };
+}
+
+function filterSegmentOwnedLines(lines: OcrLineData[], segment: PreparedOcrSegment): OcrLineData[] {
+  const ownedTop = segment.top === 0 ? 0 : segment.top + RECEIPT_TILE_OVERLAP / 2;
+  const tileBottom = segment.top + segment.height;
+  const isLastSegment = tileBottom >= segment.fullHeight;
+  const ownedBottom = isLastSegment
+    ? segment.fullHeight
+    : tileBottom - RECEIPT_TILE_OVERLAP / 2;
+  return lines.filter((line) => {
+    if (line.bbox.y1 <= line.bbox.y0) return true;
+    const lineCenter = (line.bbox.y0 + line.bbox.y1) / 2;
+    return lineCenter >= ownedTop && lineCenter < ownedBottom;
+  });
+}
+
+function deduplicateOverlappingLines(lines: OcrLineData[]): OcrLineData[] {
+  const ordered = [...lines].sort((first, second) => first.bbox.y0 - second.bbox.y0);
+  const unique: OcrLineData[] = [];
+  for (const line of ordered) {
+    const key = normalizePersianText(line.text)
+      .toLowerCase()
+      .replace(/[^0-9a-z\u0600-\u06FF]/g, '');
+    const center = (line.bbox.y0 + line.bbox.y1) / 2;
+    const duplicateIndex = key.length < 3 || line.bbox.y1 <= line.bbox.y0
+      ? -1
+      : unique.findIndex((existing) => {
+          if (existing.bbox.y1 <= existing.bbox.y0) return false;
+          const existingKey = normalizePersianText(existing.text)
+            .toLowerCase()
+            .replace(/[^0-9a-z\u0600-\u06FF]/g, '');
+          const existingCenter = (existing.bbox.y0 + existing.bbox.y1) / 2;
+          const allowedDistance = Math.max(
+            12,
+            Math.max(line.bbox.y1 - line.bbox.y0, existing.bbox.y1 - existing.bbox.y0)
+          );
+          return key === existingKey && Math.abs(center - existingCenter) <= allowedDistance;
+        });
+
+    if (duplicateIndex < 0) {
+      unique.push(line);
+    } else if (line.confidence > unique[duplicateIndex].confidence) {
+      unique[duplicateIndex] = line;
+    }
+  }
+  return unique.sort((first, second) => first.bbox.y0 - second.bbox.y0);
+}
+
 export async function runOnDeviceAutonomousScan(
   compressedFile: File,
   previewUrl: string,
@@ -336,11 +485,17 @@ export async function runOnDeviceAutonomousScan(
   height: number,
   shoppingItems: ShoppingItem[],
   language: ReceiptOcrLanguage = 'fa-en',
-  onProgress?: (stage: string, pct: number) => void
+  onProgress?: (stage: string, pct: number) => void,
+  ocrSegments: PreparedOcrSegment[] = []
 ): Promise<ScanResponse> {
   const startedAt = Date.now();
   const isNativeAndroid = Capacitor.getPlatform() === 'android';
-  const scanTimeoutMs = isNativeAndroid ? MAX_NATIVE_SCAN_TIME_MS : MAX_SCAN_TIME_MS;
+  const segments = ocrSegments.length
+    ? ocrSegments
+    : [{ file: compressedFile, width, height, top: 0, fullHeight: height }];
+  const scanTimeoutMs = isNativeAndroid
+    ? Math.min(MAX_NATIVE_SCAN_TOTAL_MS, MAX_NATIVE_SCAN_TIME_MS + Math.max(0, segments.length - 1) * 45_000)
+    : Math.min(240_000, MAX_SCAN_TIME_MS + Math.max(0, segments.length - 1) * 30_000);
   let cancelled = false;
   let rejectCancellation: ((error: Error) => void) | null = null;
   const cancelledPromise = new Promise<never>((_, reject) => {
@@ -363,80 +518,142 @@ export async function runOnDeviceAutonomousScan(
 
     if (isNativeAndroid) {
       progress('بارگذاری موتور بومی OCR و مدل‌های آفلاین...', 22);
+      const scannedLines: OcrLineData[] = [];
+      let confidenceTotal = 0;
+      let confidenceWeight = 0;
+      let currentSegmentIndex = 0;
       const nativeProgressListener = await OfflineOcrAssets.addListener('ocrProgress', (update) => {
         const nativePercent = Math.max(0, Math.min(100, Number(update.percent) || 0));
-        progress(update.stage || 'در حال خواندن فاکتور روی گوشی...', 28 + nativePercent * 0.62);
+        const overallPercent = 28 + ((currentSegmentIndex + nativePercent / 100) / segments.length) * 62;
+        const stage = segments.length > 1
+          ? `خواندن بخش ${currentSegmentIndex + 1} از ${segments.length} فاکتور...`
+          : update.stage || 'در حال خواندن فاکتور روی گوشی...';
+        progress(stage, overallPercent);
       });
       try {
-        const imageBase64 = await blobToBase64(compressedFile);
-        if (cancelled) throw new Error('SCAN_CANCELLED');
-        const remainingMs = scanTimeoutMs - (Date.now() - startedAt);
-        if (remainingMs <= 0) throw new Error('SCAN_TIMEOUT');
+        for (let index = 0; index < segments.length; index++) {
+          const segment = segments[index];
+          currentSegmentIndex = index;
+          progress(
+            segments.length > 1
+              ? `خواندن بخش ${index + 1} از ${segments.length} فاکتور...`
+              : 'در حال خواندن متن و مبلغ‌های فاکتور...',
+            28 + (index / segments.length) * 62
+          );
+          const imageBase64 = await blobToBase64(segment.file);
+          if (cancelled) throw new Error('SCAN_CANCELLED');
+          const remainingMs = scanTimeoutMs - (Date.now() - startedAt);
+          if (remainingMs <= 0) throw new Error('SCAN_TIMEOUT');
 
-        const nativeRecognition = OfflineOcrAssets.recognizeReceipt({
-          imageBase64,
-          language: OCR_LANGUAGES[language],
-          width,
-          height,
-        });
-        const recognized: NativeOcrResult = await Promise.race([
-          withTimeout(nativeRecognition, remainingMs, () => {
-            void OfflineOcrAssets.cancelRecognition().catch(() => {});
-          }),
-          cancelledPromise,
-        ]);
-        const nativeLines = Array.isArray(recognized.lines)
-          ? recognized.lines.filter((line) => line.text?.trim())
-          : [];
-        if (nativeLines.length > 0) {
-          rawLines = nativeLines.map((line) => line.text.trim());
-          lineBoxes = nativeLines.map((line) => ({
-            x: Number((line.bbox.x0 / width).toFixed(4)),
-            y: Number((line.bbox.y0 / height).toFixed(4)),
-            w: Number(((line.bbox.x1 - line.bbox.x0) / width).toFixed(4)),
-            h: Number(((line.bbox.y1 - line.bbox.y0) / height).toFixed(4)),
-            text: line.text.trim(),
-            confidence: Math.round(line.confidence || 0),
-          }));
-        } else {
-          rawLines = (recognized.text || '').split(/\r?\n/).map((text) => text.trim()).filter(Boolean);
-          lineBoxes = rawLines.map((text) => ({
-            x: 0,
-            y: 0,
-            w: 0,
-            h: 0,
-            text,
-            confidence: Math.round(recognized.confidence || 0),
-          }));
+          const nativeRecognition = OfflineOcrAssets.recognizeReceipt({
+            imageBase64,
+            language: OCR_LANGUAGES[language],
+            width: segment.width,
+            height: segment.height,
+            longReceipt: segment.fullHeight > MAX_RECEIPT_EDGE,
+          });
+          const recognized: NativeOcrResult = await Promise.race([
+            withTimeout(nativeRecognition, remainingMs, () => {
+              void OfflineOcrAssets.cancelRecognition().catch(() => {});
+            }),
+            cancelledPromise,
+          ]);
+          const nativeLines: OcrLineData[] = Array.isArray(recognized.lines)
+            ? recognized.lines
+                .filter((line) => line.text?.trim())
+                .map((line) =>
+                  mapSegmentLine(
+                    {
+                      text: line.text,
+                      confidence: Number(line.confidence) || 0,
+                      bbox: line.bbox || { x0: 0, y0: 0, x1: 0, y1: 0 },
+                    },
+                    segment
+                  )
+                )
+            : [];
+          const segmentLines = nativeLines.length > 0
+            ? filterSegmentOwnedLines(nativeLines, segment)
+            : filterSegmentOwnedLines(
+                (recognized.text || '')
+                  .split(/\r?\n/)
+                  .map((text) => text.trim())
+                  .filter(Boolean)
+                  .map((text) =>
+                    mapSegmentLine(
+                      {
+                        text,
+                        confidence: Number(recognized.confidence) || 0,
+                        bbox: { x0: 0, y0: 0, x1: 0, y1: 0 },
+                      },
+                      segment
+                    )
+                  ),
+                segment
+              );
+          scannedLines.push(...segmentLines);
+          const segmentConfidence = Number(recognized.confidence);
+          const weight = Math.max(1, segmentLines.length);
+          confidenceTotal += (Number.isFinite(segmentConfidence) ? segmentConfidence : 75) * weight;
+          confidenceWeight += weight;
         }
-        const nativeConfidence = Number(recognized.confidence);
-        confidence = Number.isFinite(nativeConfidence) ? nativeConfidence : 75;
       } finally {
         await nativeProgressListener.remove();
       }
+      const orderedLines = deduplicateOverlappingLines(scannedLines);
+      rawLines = orderedLines.map((line) => line.text.trim()).filter(Boolean);
+      lineBoxes = orderedLines.map((line) => ({
+        x: Number((line.bbox.x0 / width).toFixed(4)),
+        y: Number((line.bbox.y0 / height).toFixed(4)),
+        w: Number(((line.bbox.x1 - line.bbox.x0) / width).toFixed(4)),
+        h: Number(((line.bbox.y1 - line.bbox.y0) / height).toFixed(4)),
+        text: line.text.trim(),
+        confidence: Math.round(line.confidence || 0),
+      }));
+      confidence = confidenceWeight ? confidenceTotal / confidenceWeight : 0;
     } else {
       progress('در حال آماده‌سازی موتور OCR آفلاین...', 21);
       const worker = await Promise.race([
         getOcrWorker(language, scanTimeoutMs, onProgress),
         cancelledPromise,
       ]);
+      const scannedLines: OcrLineData[] = [];
+      let confidenceTotal = 0;
+      let confidenceWeight = 0;
 
-      const remainingMs = scanTimeoutMs - (Date.now() - startedAt);
-      if (remainingMs <= 0) {
-        disposeWorker();
-        throw new Error('SCAN_TIMEOUT');
+      for (let index = 0; index < segments.length; index++) {
+        const segment = segments[index];
+        const remainingMs = scanTimeoutMs - (Date.now() - startedAt);
+        if (remainingMs <= 0) {
+          disposeWorker();
+          throw new Error('SCAN_TIMEOUT');
+        }
+        progress(
+          segments.length > 1
+            ? `خواندن بخش ${index + 1} از ${segments.length} فاکتور...`
+            : 'در حال خواندن متن و مبلغ‌های فاکتور...',
+          36 + (index / segments.length) * 58
+        );
+        const recognition = worker.recognize(segment.file, {}, { blocks: true });
+        const recognized = await Promise.race([
+          withTimeout(recognition, remainingMs, () => disposeWorker()),
+          cancelledPromise,
+        ]);
+        const segmentLines = filterSegmentOwnedLines(
+          flattenOcrLines(recognized.data)
+            .filter((line) => line.text.trim())
+            .map((line) => mapSegmentLine(line, segment)),
+          segment
+        );
+        scannedLines.push(...segmentLines);
+        const segmentConfidence = Number(recognized.data.confidence);
+        const weight = Math.max(1, segmentLines.length);
+        confidenceTotal += (Number.isFinite(segmentConfidence) ? segmentConfidence : 75) * weight;
+        confidenceWeight += weight;
       }
-
-      progress('در حال خواندن فاکتور...', 36);
-      const recognition = worker.recognize(compressedFile, {}, { blocks: true });
-      const recognized = await Promise.race([
-        withTimeout(recognition, remainingMs, () => disposeWorker()),
-        cancelledPromise,
-      ]);
-
-      const ocrLines = flattenOcrLines(recognized.data).filter((line) => line.text.trim());
-      rawLines = ocrLines.map((line) => line.text.trim());
-      lineBoxes = ocrLines.map((line) => ({
+      const orderedLines = deduplicateOverlappingLines(scannedLines);
+      rawLines = orderedLines.map((line) => line.text.trim()).filter(Boolean);
+      lineBoxes = orderedLines.map((line) => ({
         x: Number((line.bbox.x0 / width).toFixed(4)),
         y: Number((line.bbox.y0 / height).toFixed(4)),
         w: Number(((line.bbox.x1 - line.bbox.x0) / width).toFixed(4)),
@@ -444,8 +661,7 @@ export async function runOnDeviceAutonomousScan(
         text: line.text?.trim() || '',
         confidence: Math.round(line.confidence || 0),
       }));
-      const workerConfidence = Number(recognized.data.confidence);
-      confidence = Number.isFinite(workerConfidence) ? workerConfidence : 75;
+      confidence = confidenceWeight ? confidenceTotal / confidenceWeight : 0;
     }
 
     const recoveredLines = recoverCollapsedReceiptLines(rawLines);
@@ -453,6 +669,16 @@ export async function runOnDeviceAutonomousScan(
     progress('تطبیق اقلام با چک‌لیست خرید...', 96);
     const parsed = parsePersianReceiptText(recoveredLines, recoveredLineBoxes, confidence);
     const reconciliation = reconcileReceiptWithShoppingList(parsed.items, shoppingItems);
+    const itemSubtotal = parsed.items.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
+    const amountTolerance = Math.max(500, Math.round(Math.abs(parsed.subtotal) * 0.001));
+    const payableFromItems = Math.max(0, itemSubtotal - parsed.discount_total + parsed.tax_total);
+    const ocrQuality = {
+      itemCount: parsed.items.length,
+      amountReadFromReceipt: parsed.amount_read_from_receipt,
+      subtotalReadFromReceipt: parsed.subtotal_read_from_receipt,
+      itemTotalsMatchSubtotal: Math.abs(itemSubtotal - parsed.subtotal) <= amountTolerance,
+      payableMatchesItems: Math.abs(parsed.total_amount - payableFromItems) <= amountTolerance,
+    };
     progress('فاکتور آمادهٔ بازبینی است.', 100);
     resetIdleTimer();
 
@@ -465,6 +691,7 @@ export async function runOnDeviceAutonomousScan(
       perspectiveCropped: false,
       lineBoxes: recoveredLineBoxes,
       rawOcrText: recoveredLines.join('\n'),
+      ocrQuality,
       receipt: {
         ...parsed,
         ocr_engine: language === 'tr-en' ? 'Tesseract TUR+ENG Offline' : 'Tesseract FAS+ENG Offline',
@@ -509,8 +736,11 @@ export async function scanReceiptHybrid(params: {
     URL.revokeObjectURL(prepared.previewUrl);
     throw new Error('SCAN_CANCELLED');
   }
+  const segmentMessage = prepared.ocrSegments.length > 1
+    ? `؛ فاکتور در ${prepared.ocrSegments.length} بخشِ هم‌پوشان خوانده می‌شود`
+    : '';
   onProgress?.(
-    `عکس بهینه شد (${Math.max(1, Math.round(prepared.sizeBytes / 1024))} کیلوبایت)؛ شروع اسکن آفلاین...`,
+    `عکس آماده شد (${Math.max(1, Math.round(prepared.sizeBytes / 1024))} کیلوبایت)${segmentMessage}؛ شروع اسکن آفلاین...`,
     18,
     prepared.previewUrl
   );
@@ -523,7 +753,8 @@ export async function scanReceiptHybrid(params: {
       prepared.height,
       shoppingItems,
       language,
-      (stage, percent) => onProgress?.(stage, percent, prepared.previewUrl)
+      (stage, percent) => onProgress?.(stage, percent, prepared.previewUrl),
+      prepared.ocrSegments
     );
   } catch (error) {
     // The caller owns and can reuse the compressed preview after a timeout to retry without

@@ -103,12 +103,12 @@ jobs:
                       failures.append(f"{case.get('name', 'OCR test')}: {detail}")
 
           if outcome == 'success':
-              message = 'PASS: bundled receipt OCR completed on Android 7 API 24 with Wi-Fi and mobile data disabled.'
+              message = 'PASS: bundled short and 48-item thermal receipt OCR completed on Android 7 API 24 with Wi-Fi and mobile data disabled.'
               if os.path.isfile('emulator-test.log'):
                   with open('emulator-test.log', encoding='utf-8', errors='replace') as log_file:
                       details = ' '.join(
                           line.strip() for line in log_file
-                          if 'OFFLINE_OCR_FILE_PICKER_PASS:' in line or 'OFFLINE_OCR_EMULATOR_PASS:' in line
+                          if 'OFFLINE_OCR_FILE_PICKER_PASS:' in line or 'OFFLINE_OCR_EMULATOR_PASS:' in line or 'OFFLINE_OCR_LONG_THERMAL_PASS:' in line
                       )
                   if details:
                       message += ' ' + details

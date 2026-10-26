@@ -68,6 +68,12 @@ const BUILTIN_SAMPLES = [
     desc: 'برای بررسی اسکن',
     thumb: 'samples/sample-hyperstar.png',
   },
+  {
+    id: 'thermal-long',
+    title: 'فاکتور حرارتی طولانی',
+    desc: 'برای آزمون نوشته‌های ریز و ردیف‌های زیاد',
+    thumb: 'samples/sample-thermal-long.png',
+  },
 ];
 
 export function ScannerModal({
@@ -327,6 +333,16 @@ export function ScannerModal({
   );
   const resultCurrency = scanResult?.receipt.currency || 'تومان';
   const isLiraCurrency = /(?:لیر|₺|\bTRY\b|\bTL\b)/i.test(resultCurrency);
+  const scanQualityNeedsReview = Boolean(
+    scanResult &&
+      (scanResult.receipt.ocr_confidence < 65 ||
+        !scanResult.ocrQuality?.amountReadFromReceipt ||
+        !scanResult.ocrQuality?.subtotalReadFromReceipt ||
+        scanResult.receipt.currency_detected === false ||
+        scanResult.receipt.discount_inferred ||
+        !scanResult.ocrQuality?.itemTotalsMatchSubtotal ||
+        !scanResult.ocrQuality?.payableMatchesItems)
+  );
 
   const updateItemField = (index: number, patch: Partial<ReceiptItem>) => {
     setItems((prev) =>
@@ -390,7 +406,7 @@ export function ScannerModal({
                   اسکنر هوشمند فاکتور
                 </h2>
                 <p className="text-[11px] text-slate-500">
-                  عکس بگیر یا فاکتور را از فایل‌ها انتخاب کن.
+                  اسکن آفلاین روی همین دستگاه؛ تصویر ارسال نمی‌شود.
                 </p>
               </div>
             </div>
@@ -538,6 +554,7 @@ export function ScannerModal({
                       <button
                         key={s.id}
                         type="button"
+                        data-testid={`receipt-sample-${s.id}`}
                         onClick={() => executeScan({ sampleId: s.id })}
                         className="w-full flex items-center gap-3.5 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3 text-right hover:border-blue-400 hover:bg-blue-50/40 transition cursor-pointer"
                       >
@@ -645,6 +662,92 @@ export function ScannerModal({
                         </button>
                       </div>
                     </div>
+
+                    {scanResult.ocrQuality && (
+                      <div
+                        role={scanQualityNeedsReview ? 'alert' : 'status'}
+                        className={`rounded-2xl border px-3.5 py-3 ${
+                          scanQualityNeedsReview
+                            ? 'border-amber-200 bg-amber-50 text-amber-900'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-[11px] font-extrabold">
+                            {scanResult.ocrQuality.amountReadFromReceipt
+                              ? 'مبلغ پرداختی خوانده‌شده'
+                              : 'مبلغ پرداختی محاسبه‌شده'}
+                          </span>
+                          <span
+                            data-testid="ocr-source-total"
+                            data-amount={scanResult.receipt.total_amount}
+                            className="text-sm font-black tabular-fa"
+                          >
+                            {formatCurrency(scanResult.receipt.total_amount, resultCurrency)}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 flex items-center gap-1.5 text-[10px] font-extrabold">
+                          {scanQualityNeedsReview ? (
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                          ) : (
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          <span>{scanQualityNeedsReview ? 'نیازمند بازبینی' : 'مبالغ هم‌خوان هستند'}</span>
+                        </div>
+                        <div className="mt-1.5 flex items-center justify-between gap-3 text-[10px]">
+                          <span>
+                            {scanResult.ocrQuality.subtotalReadFromReceipt
+                              ? 'جمع اقلام خوانده‌شده از فاکتور'
+                              : 'جمع اقلام محاسبه‌شده از ردیف‌ها'}
+                          </span>
+                          <span
+                            data-testid="ocr-source-subtotal"
+                            data-amount={scanResult.receipt.subtotal}
+                            data-read-from-receipt={scanResult.ocrQuality.subtotalReadFromReceipt}
+                            className="font-bold tabular-fa"
+                          >
+                            {formatCurrency(scanResult.receipt.subtotal, resultCurrency)}
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-[11px] leading-5">
+                          {!scanResult.ocrQuality.amountReadFromReceipt
+                            ? 'مبلغ نهایی در متن فاکتور پیدا نشد و از روی ردیف‌ها محاسبه شده؛ آن را با اصل فاکتور مقایسه کن.'
+                            : scanResult.ocrQuality.payableMatchesItems
+                              ? 'مبلغ نهایی با جمع ردیف‌ها و تخفیف هماهنگ است.'
+                              : 'مبلغ نهایی با جمع ردیف‌ها جور درنمی‌آید؛ قبل از ثبت، اعداد را بررسی کن.'}
+                        </p>
+                        {!scanResult.ocrQuality.subtotalReadFromReceipt && (
+                          <p className="mt-1 text-[11px] font-bold leading-5">
+                            جمع اقلام چاپ‌شده پیدا نشد و از روی ردیف‌های خوانده‌شده محاسبه شده است.
+                          </p>
+                        )}
+                        {scanResult.receipt.currency_detected === false && (
+                          <p className="mt-1 text-[11px] font-bold leading-5">
+                            واحد پول در متن پیدا نشد؛ مبالغ فعلاً تومان در نظر گرفته شده‌اند. واحد را با فاکتور اصلی تطبیق بده.
+                          </p>
+                        )}
+                        {scanResult.receipt.detected_rial && (
+                          <p className="mt-1 text-[11px] font-bold leading-5">
+                            واحد چاپ‌شده ریال تشخیص داده شد و برای نمایش به تومان تبدیل شده است.
+                          </p>
+                        )}
+                        {!scanResult.ocrQuality.itemTotalsMatchSubtotal && (
+                          <p className="mt-1 text-[11px] font-bold leading-5">
+                            جمع ردیف‌های خوانده‌شده با جمع اقلام فاکتور برابر نیست.
+                          </p>
+                        )}
+                        {scanResult.receipt.discount_inferred && (
+                          <p className="mt-1 text-[11px] font-bold leading-5">
+                            تخفیف از اختلاف جمع اقلام و مبلغ پرداختی برآورد شده؛ مقدارش را با اصل فاکتور تطبیق بده.
+                          </p>
+                        )}
+                        {scanResult.receipt.ocr_confidence < 65 && (
+                          <p className="mt-1 text-[11px] font-bold leading-5">
+                            بخشی از نوشته‌ها واضح نیست؛ ردیف‌ها را پیش از ذخیره بازبینی کن.
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     <div className="relative max-h-60 overflow-y-auto rounded-2xl bg-slate-900/5 border border-slate-200">
                       <div className="relative w-full">
@@ -956,6 +1059,7 @@ export function ScannerModal({
             <div className="flex items-center gap-2.5 bg-white px-5 py-4 border-t border-slate-200 shrink-0">
               <button
                 type="button"
+                data-testid="receipt-rescan"
                 onClick={() => setStep('capture')}
                 className="rounded-2xl border border-slate-200 px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
