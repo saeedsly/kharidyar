@@ -15,17 +15,15 @@ import {
   recoverCollapsedReceiptLines,
 } from './persianMatcher';
 
-export type ReceiptOcrLanguage = 'fa' | 'fa-en' | 'tr-en';
+export type ReceiptOcrLanguage = 'fa-en' | 'tr-en';
 export type ReceiptProcessingMode = 'auto' | 'high-contrast';
 
 const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
-  fa: 'fas',
   'fa-en': 'fas+eng',
   'tr-en': 'tur+eng',
 };
 const OCR_ENGINE_NAMES: Record<ReceiptOcrLanguage, { display: string; receipt: string }> = {
-  fa: { display: 'OCR آفلاین فارسی', receipt: 'Tesseract FAS Offline' },
-  'fa-en': { display: 'OCR آفلاین فارسی و انگلیسی', receipt: 'Tesseract FAS+ENG Offline' },
+  'fa-en': { display: 'OCR آفلاین فارسی‌محور و انگلیسی', receipt: 'Tesseract FAS+ENG Offline' },
   'tr-en': { display: 'OCR آفلاین ترکی و انگلیسی', receipt: 'Tesseract TUR+ENG Offline' },
 };
 const MAX_RECEIPT_EDGE = 2800;
@@ -572,7 +570,7 @@ export async function runOnDeviceAutonomousScan(
   width: number,
   height: number,
   shoppingItems: ShoppingItem[],
-  language: ReceiptOcrLanguage = 'fa',
+  language: ReceiptOcrLanguage = 'fa-en',
   onProgress?: (stage: string, pct: number) => void,
   ocrSegments: PreparedOcrSegment[] = []
 ): Promise<ScanResponse> {
@@ -822,7 +820,7 @@ export async function scanReceiptHybrid(params: {
     file,
     sampleId,
     imageUrl,
-    language = 'fa',
+    language = 'fa-en',
     processingMode = 'auto',
     shoppingItems,
     onProgress,

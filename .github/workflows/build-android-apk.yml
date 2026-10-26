@@ -157,7 +157,7 @@ jobs:
           **Test build only — not an official stable release.**
 
           This APK is provided for manual testing. It was built from commit ${GITHUB_SHA}.
-          Android capture uses the native camera again; the in-preview framing box has been removed. Persian-only FAS is now the default OCR model, and Persian+English remains selectable.
+          Android capture uses the native camera again; the in-preview framing box has been removed. Persian-first FAS+ENG is the default OCR model; English remains available for Latin names.
           Persian/Arabic letter variants and digits are normalized locally; receipt OCR remains offline and on-device. The high-contrast Otsu option is experimental and has not been validated against native OCR.
           The camera flow has not yet been verified on a physical handset.
           This pre-release does not certify OCR accuracy; review the extracted items and totals before saving.

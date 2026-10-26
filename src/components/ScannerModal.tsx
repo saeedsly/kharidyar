@@ -98,7 +98,7 @@ export function ScannerModal({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [ocrLanguage, setOcrLanguage] = useState<ReceiptOcrLanguage>('fa');
+  const [ocrLanguage, setOcrLanguage] = useState<ReceiptOcrLanguage>('fa-en');
   const [processingMode, setProcessingMode] = useState<ReceiptProcessingMode>('auto');
 
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
@@ -506,15 +506,14 @@ export function ScannerModal({
                     <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
                       <span>
                         <span className="block text-xs font-extrabold text-slate-800">زبان فاکتور</span>
-                        <span className="mt-0.5 block text-[10px] text-slate-500">فارسی اولویت دارد؛ برای متن لاتین، حالت ترکیبی را بزن.</span>
+                        <span className="mt-0.5 block text-[10px] text-slate-500">فارسی در OCR جلوتر است؛ نام‌های لاتین هم با مدل انگلیسی خوانده می‌شوند.</span>
                       </span>
                       <select
                         value={ocrLanguage}
                         onChange={(event) => setOcrLanguage(event.target.value as ReceiptOcrLanguage)}
                         className="max-w-[160px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500"
                       >
-                        <option value="fa">فارسی — اولویت</option>
-                        <option value="fa-en">فارسی + انگلیسی</option>
+                        <option value="fa-en">فارسی‌محور + انگلیسی</option>
                         <option value="tr-en">ترکی + انگلیسی</option>
                       </select>
                     </label>
