@@ -152,20 +152,25 @@ public class OfflineOcrEmulatorTest {
                         ".map(element => Number(element.getAttribute('data-amount'))))"
                     );
                     String parsedSubtotal = evaluate(scenario,
-                        "document.querySelector('[data-testid=\"receipt-subtotal\"]')?.getAttribute('data-amount') || ''"
+                        "(function() { var node = document.querySelector('[data-testid=\"receipt-subtotal\"]'); " +
+                        "return node ? node.getAttribute('data-amount') || '' : ''; })()"
                     );
                     String parsedDiscount = evaluate(scenario,
-                        "document.querySelector('[data-testid=\"receipt-discount\"]')?.value || ''"
+                        "(function() { var node = document.querySelector('[data-testid=\"receipt-discount\"]'); " +
+                        "return node ? node.value || '' : ''; })()"
                     );
                     String parsedPayableTotal = evaluate(scenario,
-                        "document.querySelector('[data-testid=\"receipt-payable-total\"]')?.getAttribute('data-amount') || ''"
+                        "(function() { var node = document.querySelector('[data-testid=\"receipt-payable-total\"]'); " +
+                        "return node ? node.getAttribute('data-amount') || '' : ''; })()"
                     );
                     String reviewDetails = evaluate(scenario,
-                        "JSON.stringify({discount: document.querySelector('[data-testid=\"receipt-discount\"]')?.outerHTML || null, " +
-                        "subtotal: document.querySelector('[data-testid=\"receipt-subtotal\"]')?.outerHTML || null, " +
-                        "payable: document.querySelector('[data-testid=\"receipt-payable-total\"]')?.outerHTML || null, " +
-                        "inputs: Array.from(document.querySelectorAll('input')).map(input => ({testId: input.getAttribute('data-testid'), value: input.value})), " +
-                        "summary: document.body.innerText.slice(-700)})"
+                        "JSON.stringify((function() { var discount = document.querySelector('[data-testid=\"receipt-discount\"]'); " +
+                        "var subtotal = document.querySelector('[data-testid=\"receipt-subtotal\"]'); " +
+                        "var payable = document.querySelector('[data-testid=\"receipt-payable-total\"]'); " +
+                        "return {discount: discount ? discount.outerHTML : null, subtotal: subtotal ? subtotal.outerHTML : null, " +
+                        "payable: payable ? payable.outerHTML : null, " +
+                        "inputs: Array.from(document.querySelectorAll('input')).map(function(input) { return {testId: input.getAttribute('data-testid'), value: input.value}; }), " +
+                        "summary: document.body.innerText.slice(-700)}; })())"
                     );
                     assertTrue("OCR returned too little receipt text (" + rawOcrText.length() + " characters).", rawOcrText.length() >= 100);
                     assertTrue("OCR returned too few receipt lines (" + recognizedLines + "). Raw text: " + rawOcrText.substring(0, Math.min(400, rawOcrText.length())), recognizedLines >= 8);
