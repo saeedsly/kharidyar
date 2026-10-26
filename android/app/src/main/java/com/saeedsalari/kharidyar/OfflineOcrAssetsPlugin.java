@@ -277,6 +277,7 @@ public class OfflineOcrAssetsPlugin extends Plugin {
                 || textLength < 80
                 || amountCount < minimumAmountCount
                 || persianLetterCount < minimumPersianLetterCount;
+        }
         if (portraitReceipt) {
             int minimumCharacters = Math.max(70, Math.min(180, bitmap.getHeight() / 12));
             return result.confidence < 82
