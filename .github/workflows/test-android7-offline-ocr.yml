@@ -60,15 +60,15 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           disable-animations: true
           working-directory: android
-          script: |
-            adb shell svc wifi disable >/dev/null 2>&1 || true
-            adb shell svc data disable >/dev/null 2>&1 || true
-            set +e
-            ./gradlew --no-daemon :app:connectedDebugAndroidTest > ../emulator-test.log 2>&1
-            test_status=$?
-            cat ../emulator-test.log
-            printf '\nANDROID_TEST_GRADLE_EXIT_CODE=%s\n' "$test_status" | tee -a ../emulator-test.log
-            adb logcat -d -v threadtime '*:E' OfflineOcrAssets:V AndroidRuntime:E > ../emulator-logcat.txt || true
+          # The action runs each input line separately, so keep status capture in one folded shell command.
+          script: >-
+            adb shell svc wifi disable >/dev/null 2>&1 || true;
+            adb shell svc data disable >/dev/null 2>&1 || true;
+            ./gradlew --no-daemon :app:connectedDebugAndroidTest > ../emulator-test.log 2>&1;
+            test_status=$?;
+            cat ../emulator-test.log;
+            printf '\nANDROID_TEST_GRADLE_EXIT_CODE=%s\n' "$test_status" | tee -a ../emulator-test.log;
+            adb logcat -d -v threadtime '*:E' OfflineOcrAssets:V AndroidRuntime:E > ../emulator-logcat.txt || true;
             exit "$test_status"
 
       - name: Summarize emulator OCR result
