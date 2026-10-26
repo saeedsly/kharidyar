@@ -25,7 +25,7 @@ import static org.junit.Assert.fail;
 @RunWith(AndroidJUnit4.class)
 public class OfflineOcrEmulatorTest {
     private static final long APP_READY_TIMEOUT_MS = 30_000;
-    private static final long OCR_TIMEOUT_MS = 300_000;
+    private static final long OCR_TIMEOUT_MS = 420_000;
 
     @Test
     public void bundledReceiptOcrCompletesOfflineOnAndroid7() throws Exception {

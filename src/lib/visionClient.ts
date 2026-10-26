@@ -19,6 +19,7 @@ const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
 const MAX_RECEIPT_EDGE = 2800;
 const LONG_RECEIPT_MIN_EDGE = 2400;
 const RECEIPT_TILE_OVERLAP = 160;
+const LONG_THERMAL_TILE_HEIGHT = 1400;
 const MAX_RECEIPT_TILES = 8;
 const MAX_SCAN_TIME_MS = 90_000;
 const MAX_NATIVE_SCAN_TIME_MS = 180_000;
@@ -303,8 +304,10 @@ export async function normalizeAndCompressReceiptPhoto(
     // Do not shrink a long thermal receipt to a single 2,800-pixel image. That used to turn
     // fine print into a few unreadable pixels. Keep the original print resolution and OCR
     // overlapping strips; the overlap prevents a row at a strip boundary from being cut in half.
-    const isLongReceipt =
-      sourceHeight >= LONG_RECEIPT_MIN_EDGE && sourceHeight / sourceWidth >= 1.3;
+    const receiptAspectRatio = sourceHeight / sourceWidth;
+    const isLongReceipt = sourceHeight >= LONG_RECEIPT_MIN_EDGE && receiptAspectRatio >= 1.3;
+    const isNarrowThermalReceipt = isLongReceipt && sourceWidth <= 1400 && receiptAspectRatio >= 2.3;
+    const segmentHeightLimit = isNarrowThermalReceipt ? LONG_THERMAL_TILE_HEIGHT : MAX_RECEIPT_EDGE;
     const ocrScale = isLongReceipt
       ? Math.min(1, MAX_RECEIPT_EDGE / sourceWidth)
       : previewScale;
@@ -312,18 +315,18 @@ export async function normalizeAndCompressReceiptPhoto(
     const height = Math.max(1, Math.round(sourceHeight * ocrScale));
     const segments: PreparedOcrSegment[] = [];
 
-    if (!isLongReceipt || height <= MAX_RECEIPT_EDGE) {
+    if (!isLongReceipt || height <= segmentHeightLimit) {
       segments.push({ file: compressedFile, width, height, top: 0, fullHeight: height });
     } else {
-      const stride = MAX_RECEIPT_EDGE - RECEIPT_TILE_OVERLAP;
+      const stride = segmentHeightLimit - RECEIPT_TILE_OVERLAP;
       const segmentCount = Math.ceil((height - RECEIPT_TILE_OVERLAP) / stride);
       if (segmentCount > MAX_RECEIPT_TILES) {
         URL.revokeObjectURL(previewUrl);
-        throw new Error('فاکتور بیش از حد بلند است؛ لطفاً آن را در دو عکسِ هم‌پوشان اسکن کن.');
+        throw new Error('فاکتور بیش از حد بلند است؛ آن را به چند عکسِ هم‌پوشان تقسیم کن.');
       }
 
       for (let top = 0; top < height; top += stride) {
-        const tileHeight = Math.min(MAX_RECEIPT_EDGE, height - top);
+        const tileHeight = Math.min(segmentHeightLimit, height - top);
         const tileCanvas = document.createElement('canvas');
         tileCanvas.width = width;
         tileCanvas.height = tileHeight;
@@ -494,7 +497,7 @@ export async function runOnDeviceAutonomousScan(
     ? ocrSegments
     : [{ file: compressedFile, width, height, top: 0, fullHeight: height }];
   const scanTimeoutMs = isNativeAndroid
-    ? Math.min(MAX_NATIVE_SCAN_TOTAL_MS, MAX_NATIVE_SCAN_TIME_MS + Math.max(0, segments.length - 1) * 45_000)
+    ? Math.min(MAX_NATIVE_SCAN_TOTAL_MS, MAX_NATIVE_SCAN_TIME_MS + Math.max(0, segments.length - 1) * 90_000)
     : Math.min(240_000, MAX_SCAN_TIME_MS + Math.max(0, segments.length - 1) * 30_000);
   let cancelled = false;
   let rejectCancellation: ((error: Error) => void) | null = null;
@@ -550,9 +553,9 @@ export async function runOnDeviceAutonomousScan(
             language: OCR_LANGUAGES[language],
             width: segment.width,
             height: segment.height,
-            longReceipt: segment.fullHeight > MAX_RECEIPT_EDGE,
+            longReceipt: segments.length > 1,
             receiptTail:
-              segment.fullHeight > MAX_RECEIPT_EDGE &&
+              segments.length > 1 &&
               segment.top + segment.height >= segment.fullHeight,
           });
           const recognized: NativeOcrResult = await Promise.race([
