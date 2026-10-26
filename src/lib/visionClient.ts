@@ -4,6 +4,11 @@ import type { BoundingBox, ScanResponse, ShoppingItem } from '../types';
 import { assetUrl } from './assetUrl';
 import { OfflineOcrAssets, type NativeOcrResult } from './offlineOcrAssets';
 import {
+  addRgbaToHistogram,
+  applyOtsuThreshold,
+  calculateOtsuThreshold,
+} from './receiptImageProcessing';
+import {
   normalizePersianText,
   parsePersianReceiptText,
   reconcileReceiptWithShoppingList,
@@ -11,6 +16,7 @@ import {
 } from './persianMatcher';
 
 export type ReceiptOcrLanguage = 'fa-en' | 'tr-en';
+export type ReceiptProcessingMode = 'auto' | 'high-contrast';
 
 const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
   'fa-en': 'fas+eng',
@@ -267,8 +273,31 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
+function applyOtsuBinarization(canvas: HTMLCanvasElement): void {
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('مرورگر نتوانست تصویر پرکنتراست را آماده کند.');
+
+  // Keep temporary ImageData small on older Android devices with limited memory.
+  const rowsPerChunk = 96;
+  const histogram = new Uint32Array(256);
+  for (let top = 0; top < canvas.height; top += rowsPerChunk) {
+    const chunkHeight = Math.min(rowsPerChunk, canvas.height - top);
+    const imageData = context.getImageData(0, top, canvas.width, chunkHeight);
+    addRgbaToHistogram(imageData.data, histogram);
+  }
+
+  const threshold = calculateOtsuThreshold(histogram);
+  for (let top = 0; top < canvas.height; top += rowsPerChunk) {
+    const chunkHeight = Math.min(rowsPerChunk, canvas.height - top);
+    const imageData = context.getImageData(0, top, canvas.width, chunkHeight);
+    applyOtsuThreshold(imageData.data, threshold);
+    context.putImageData(imageData, 0, top);
+  }
+}
+
 export async function normalizeAndCompressReceiptPhoto(
-  source: File | Blob | string
+  source: File | Blob | string,
+  processingMode: ReceiptProcessingMode = 'auto'
 ): Promise<{
   compressedFile: File;
   previewUrl: string;
@@ -318,8 +347,22 @@ export async function normalizeAndCompressReceiptPhoto(
       // No-op on older WebViews.
     }
 
-    const previewBlob = await canvasToJpeg(previewCanvas, 0.92);
-    const compressedFile = new File([previewBlob], `receipt-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    const useHighContrast = processingMode === 'high-contrast';
+    if (useHighContrast) {
+      try {
+        applyOtsuBinarization(previewCanvas);
+      } catch {
+        throw new Error('حالت پرکنتراست روی این دستگاه آماده نشد؛ حالت هوشمند را انتخاب کن.');
+      }
+    }
+    const previewBlob = useHighContrast
+      ? await canvasToPng(previewCanvas)
+      : await canvasToJpeg(previewCanvas, 0.92);
+    const previewExtension = useHighContrast ? 'png' : 'jpg';
+    const previewType = useHighContrast ? 'image/png' : 'image/jpeg';
+    const compressedFile = new File([previewBlob], `receipt-${Date.now()}.${previewExtension}`, {
+      type: previewType,
+    });
     const previewUrl = URL.createObjectURL(previewBlob);
 
     // Do not shrink a long thermal receipt to a single 2,800-pixel image. That used to turn
@@ -379,13 +422,22 @@ export async function normalizeAndCompressReceiptPhoto(
         } catch {
           // No-op on older WebViews.
         }
+        if (useHighContrast) {
+          try {
+            applyOtsuBinarization(tileCanvas);
+          } catch {
+            URL.revokeObjectURL(previewUrl);
+            throw new Error('حالت پرکنتراست روی این دستگاه آماده نشد؛ حالت هوشمند را انتخاب کن.');
+          }
+        }
         // Small Persian thermal glyphs are sensitive to JPEG ringing around thin strokes. Keep
-        // narrow receipt strips lossless for OCR; wider document scans remain compressed JPEGs.
-        const tileType = isNarrowThermalReceipt ? 'image/png' : 'image/jpeg';
-        const tileBlob = isNarrowThermalReceipt
+        // narrow receipt strips lossless in Auto; the experimental binary mode is lossless too.
+        const keepLossless = isNarrowThermalReceipt || useHighContrast;
+        const tileType = keepLossless ? 'image/png' : 'image/jpeg';
+        const tileBlob = keepLossless
           ? await canvasToPng(tileCanvas)
           : await canvasToJpeg(tileCanvas, 0.94);
-        const tileExtension = isNarrowThermalReceipt ? 'png' : 'jpg';
+        const tileExtension = keepLossless ? 'png' : 'jpg';
         const tileFile = new File([tileBlob], `receipt-part-${segments.length + 1}.${tileExtension}`, {
           type: tileType,
         });
@@ -756,16 +808,25 @@ export async function scanReceiptHybrid(params: {
   sampleId?: string | null;
   imageUrl?: string | null;
   language?: ReceiptOcrLanguage;
+  processingMode?: ReceiptProcessingMode;
   shoppingItems: ShoppingItem[];
   onProgress?: (stage: string, pct: number, previewUrl?: string) => void;
 }): Promise<ScanResponse> {
-  const { file, sampleId, imageUrl, language = 'fa-en', shoppingItems, onProgress } = params;
+  const {
+    file,
+    sampleId,
+    imageUrl,
+    language = 'fa-en',
+    processingMode = 'auto',
+    shoppingItems,
+    onProgress,
+  } = params;
   cancelRequested = false;
   const source: File | Blob | string =
     file || imageUrl || assetUrl(`samples/sample-${sampleId || 'ofogh'}.png`);
 
   onProgress?.('فشرده‌سازی عکس و آماده‌سازی فاکتور روی گوشی...', 8);
-  const prepared = await normalizeAndCompressReceiptPhoto(source);
+  const prepared = await normalizeAndCompressReceiptPhoto(source, processingMode);
   if (cancelRequested) {
     URL.revokeObjectURL(prepared.previewUrl);
     throw new Error('SCAN_CANCELLED');

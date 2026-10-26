@@ -10,6 +10,7 @@
     "dev:server": "tsx server/index.ts",
     "build": "node scripts/prepare-assets.mjs && vite build",
     "test:ocr-parser": "tsx scripts/test-persian-receipt-parser.ts",
+    "test:ocr-image-processing": "tsx scripts/test-receipt-image-processing.ts",
     "cap:sync": "npm run build && npx cap sync android",
     "start": "bash -c '[ -d node_modules ] || npm install --no-audit --no-fund; [ -f dist/index.html ] || npm run build; exec npx tsx server/index.ts'"
   },
