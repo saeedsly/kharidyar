@@ -80,65 +80,6 @@ const BUILTIN_SAMPLES = [
   },
 ];
 
-type CameraGuidanceState = 'checking' | 'ready' | 'dim' | 'glare' | 'soft';
-
-const CAMERA_GUIDANCE_COPY: Record<CameraGuidanceState, string> = {
-  checking: 'در حال بررسی نور و وضوح…',
-  ready: 'نور و وضوح مناسب',
-  dim: 'نور کم است؛ نور محیط را بیشتر کن.',
-  glare: 'بازتاب زیاد است؛ زاویهٔ گوشی را کمی تغییر بده.',
-  soft: 'تصویر محو است؛ گوشی را ثابت‌تر یا کمی نزدیک‌تر نگه‌دار.',
-};
-
-function inspectCameraFrame(
-  video: HTMLVideoElement,
-  canvas: HTMLCanvasElement,
-  context: CanvasRenderingContext2D
-): CameraGuidanceState {
-  if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return 'checking';
-
-  context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
-  const grayscale = new Uint8Array(canvas.width * canvas.height);
-  let brightnessTotal = 0;
-
-  for (let offset = 0, pixel = 0; offset < data.length; offset += 4, pixel += 1) {
-    const gray = Math.round(
-      (299 * data[offset] + 587 * data[offset + 1] + 114 * data[offset + 2]) / 1000
-    );
-    grayscale[pixel] = gray;
-    brightnessTotal += gray;
-  }
-
-  const pixelCount = grayscale.length;
-  const averageBrightness = brightnessTotal / pixelCount;
-  let laplacianTotal = 0;
-  let squaredLaplacianTotal = 0;
-  let edgeSamples = 0;
-
-  for (let y = 1; y < canvas.height - 1; y += 1) {
-    for (let x = 1; x < canvas.width - 1; x += 1) {
-      const index = y * canvas.width + x;
-      const laplacian =
-        4 * grayscale[index] -
-        grayscale[index - 1] -
-        grayscale[index + 1] -
-        grayscale[index - canvas.width] -
-        grayscale[index + canvas.width];
-      laplacianTotal += laplacian;
-      squaredLaplacianTotal += laplacian * laplacian;
-      edgeSamples += 1;
-    }
-  }
-
-  const averageLaplacian = laplacianTotal / edgeSamples;
-  const sharpness = squaredLaplacianTotal / edgeSamples - averageLaplacian * averageLaplacian;
-  if (averageBrightness < 60) return 'dim';
-  if (averageBrightness > 249) return 'glare';
-  if (sharpness < 70) return 'soft';
-  return 'ready';
-}
-
 export function ScannerModal({
   isOpen,
   initialSampleId,
@@ -154,12 +95,10 @@ export function ScannerModal({
   const [progressPct, setProgressPct] = useState<number>(8);
   const [scanningPreviewUrl, setScanningPreviewUrl] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
-  const [cameraGuidance, setCameraGuidance] = useState<CameraGuidanceState>('checking');
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [nativeCameraFallbackAvailable, setNativeCameraFallbackAvailable] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [ocrLanguage, setOcrLanguage] = useState<ReceiptOcrLanguage>('fa-en');
+  const [ocrLanguage, setOcrLanguage] = useState<ReceiptOcrLanguage>('fa');
   const [processingMode, setProcessingMode] = useState<ReceiptProcessingMode>('auto');
 
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
@@ -228,73 +167,30 @@ export function ScannerModal({
     []
   );
 
-  useEffect(() => {
-    if (!cameraActive) {
-      setCameraGuidance('checking');
-      return;
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 96;
-    canvas.height = 96;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) return;
-
-    const interval = window.setInterval(() => {
-      const video = videoRef.current;
-      if (!video) return;
-      try {
-        setCameraGuidance(inspectCameraFrame(video, canvas, context));
-      } catch {
-        setCameraGuidance('checking');
-      }
-    }, 600);
-
-    return () => window.clearInterval(interval);
-  }, [cameraActive]);
-
-  const captureUsingNativeCamera = async () => {
-    setCameraError(null);
-    setNativeCameraFallbackAvailable(false);
-    try {
-      const photo = await CapCamera.getPhoto({
-        quality: 95,
-        width: 3200,
-        allowEditing: false,
-        resultType: CameraResultType.Uri,
-        source: CameraSource.Camera,
-      });
-      const imageUrl = photo.webPath || (photo.path ? Capacitor.convertFileSrc(photo.path) : null);
-      if (imageUrl) await executeScan({ imageUrl });
-      else {
-        setCameraError('دوربین عکسی برنگرداند؛ دوباره امتحان کن یا از گالری انتخاب کن.');
-        setNativeCameraFallbackAvailable(Capacitor.isNativePlatform());
-      }
-    } catch (err: any) {
-      if (String(err?.message || '').toLowerCase().includes('cancel')) return;
-      setCameraError('دوربین گوشی باز نشد؛ مجوز دوربین را بررسی کن یا از گالری عکس انتخاب کن.');
-      setNativeCameraFallbackAvailable(Capacitor.isNativePlatform());
-    }
-  };
-
   const startLiveWebCamera = async () => {
     setCameraError(null);
-    setNativeCameraFallbackAvailable(false);
-    setCameraGuidance('checking');
-
-    const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
-    if (!getUserMedia) {
-      setCameraError(
-        Capacitor.isNativePlatform()
-          ? 'پیش‌نمایش زنده در این دستگاه پشتیبانی نمی‌شود؛ می‌توانی دوربین گوشی را باز کنی.'
-          : 'مرورگر به دوربین دسترسی ندارد؛ مجوز دوربین را بررسی یا عکس را از فایل‌ها انتخاب کن.'
-      );
-      setNativeCameraFallbackAvailable(Capacitor.isNativePlatform());
-      return;
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const photo = await CapCamera.getPhoto({
+          quality: 95,
+          width: 3200,
+          allowEditing: false,
+          resultType: CameraResultType.Uri,
+          source: CameraSource.Camera,
+        });
+        const imageUrl = photo.webPath || (photo.path ? Capacitor.convertFileSrc(photo.path) : null);
+        if (imageUrl) await executeScan({ imageUrl });
+        else setCameraError('دوربین عکسی برنگرداند؛ لطفاً یک‌بار دیگر امتحان کن.');
+        return;
+      } catch (err: any) {
+        if (String(err?.message || '').toLowerCase().includes('cancel')) return;
+        setCameraError('دوربین باز نشد. اگر اجازهٔ دوربین رد شده، از گالری عکس انتخاب کن.');
+        return;
+      }
     }
 
     try {
-      const stream = await getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
           width: { ideal: 1920 },
@@ -307,20 +203,11 @@ export function ScannerModal({
       requestAnimationFrame(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          void videoRef.current.play().catch(() => {
-            stopCameraStream();
-            setCameraError('پیش‌نمایش دوربین اجرا نشد؛ دوربین گوشی یا گالری را امتحان کن.');
-            setNativeCameraFallbackAvailable(Capacitor.isNativePlatform());
-          });
+          void videoRef.current.play();
         }
       });
     } catch {
-      setCameraError(
-        Capacitor.isNativePlatform()
-          ? 'پیش‌نمایش زنده باز نشد؛ مجوز دوربین را بررسی کن یا از دوربین گوشی استفاده کن.'
-          : 'دوربین باز نشد؛ مجوز دوربین را بررسی یا تصویر را از فایل‌ها انتخاب کن.'
-      );
-      setNativeCameraFallbackAvailable(Capacitor.isNativePlatform());
+      setCameraError('دوربین باز نشد؛ می‌توانی تصویر فاکتور را از فایل‌ها انتخاب کنی.');
     }
   };
 
@@ -335,10 +222,10 @@ export function ScannerModal({
     canvas.height = video.videoHeight;
     const context = canvas.getContext('2d');
     if (!context) {
-      setCameraError('گوشی نتوانست فریم دوربین را ذخیره کند؛ از دوربین گوشی یا گالری استفاده کن.');
-      setNativeCameraFallbackAvailable(Capacitor.isNativePlatform());
+      setCameraError('ذخیرهٔ عکس دوربین ناموفق بود؛ از گالری تصویر انتخاب کن.');
       return;
     }
+
     setCameraError(null);
     let blob: Blob | null;
     try {
@@ -348,14 +235,12 @@ export function ScannerModal({
       );
     } catch {
       stopCameraStream();
-      setCameraError('ذخیرهٔ فریم دوربین ناموفق بود؛ دوباره امتحان کن یا از دوربین گوشی استفاده کن.');
-      setNativeCameraFallbackAvailable(Capacitor.isNativePlatform());
+      setCameraError('ذخیرهٔ عکس دوربین ناموفق بود؛ دوباره امتحان کن یا از گالری انتخاب کن.');
       return;
     }
     stopCameraStream();
     if (!blob) {
       setCameraError('عکس دوربین آماده نشد؛ دوباره عکس بگیر یا از گالری انتخاب کن.');
-      setNativeCameraFallbackAvailable(Capacitor.isNativePlatform());
       return;
     }
     await executeScan({ file: new File([blob], `receipt-${Date.now()}.jpg`, { type: 'image/jpeg' }) });
@@ -590,62 +475,13 @@ export function ScannerModal({
                       muted
                       className="h-full w-full object-cover"
                     />
-                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/35 via-transparent to-black/55" />
-
-                    <div
-                      aria-hidden="true"
-                      className={`pointer-events-none absolute inset-[9%] overflow-hidden rounded-2xl border-2 transition-colors duration-300 ${
-                        cameraGuidance === 'ready'
-                          ? 'border-emerald-400/90 text-emerald-400'
-                          : cameraGuidance === 'checking'
-                            ? 'border-white/70 text-white'
-                            : 'border-amber-300/90 text-amber-300'
-                      }`}
-                    >
-                      <span className="absolute left-0 top-0 h-7 w-7 rounded-tl-xl border-l-[3px] border-t-[3px] border-current" />
-                      <span className="absolute right-0 top-0 h-7 w-7 rounded-tr-xl border-r-[3px] border-t-[3px] border-current" />
-                      <span className="absolute bottom-0 left-0 h-7 w-7 rounded-bl-xl border-b-[3px] border-l-[3px] border-current" />
-                      <span className="absolute bottom-0 right-0 h-7 w-7 rounded-br-xl border-b-[3px] border-r-[3px] border-current" />
-                      <motion.div
-                        animate={{ top: ['8%', '92%', '8%'] }}
-                        transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
-                        className={`absolute inset-x-0 h-0.5 shadow-[0_0_16px_3px_rgba(59,130,246,0.75)] ${
-                          cameraGuidance === 'ready' ? 'bg-emerald-300' : 'bg-blue-400'
-                        }`}
-                      />
-                    </div>
-
-                    <div
-                      role="status"
-                      aria-live="polite"
-                      className={`absolute left-3 right-3 top-3 mx-auto flex max-w-fit items-center gap-2 rounded-full px-3.5 py-2 text-[11px] font-extrabold shadow-lg backdrop-blur-md ${
-                        cameraGuidance === 'ready'
-                          ? 'bg-emerald-600/90 text-white'
-                          : cameraGuidance === 'checking'
-                            ? 'bg-slate-900/70 text-white'
-                            : 'bg-amber-500/95 text-slate-950'
-                      }`}
-                    >
-                      {cameraGuidance === 'ready' ? (
-                        <CheckCircle2 className="h-4 w-4 shrink-0" />
-                      ) : cameraGuidance === 'checking' ? (
-                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                      ) : (
-                        <AlertTriangle className="h-4 w-4 shrink-0" />
-                      )}
-                      <span>{CAMERA_GUIDANCE_COPY[cameraGuidance]}</span>
-                    </div>
-
                     {cameraError && (
-                      <p
-                        role="alert"
-                        className="absolute inset-x-4 bottom-[148px] rounded-xl bg-amber-100/95 px-3 py-2 text-center text-[10px] font-bold leading-5 text-amber-950"
-                      >
+                      <p role="alert" className="absolute inset-x-4 bottom-24 rounded-xl bg-amber-100/95 px-3 py-2 text-center text-[10px] font-bold leading-5 text-amber-950">
                         {cameraError}
                       </p>
                     )}
-                    <p className="absolute inset-x-4 bottom-[92px] rounded-xl bg-black/45 px-3 py-2 text-center text-[10px] font-semibold leading-5 text-white">
-                      فاکتور را بین گوشه‌ها نگه‌دار؛ این راهنمای نور و وضوح است، نه تشخیص خودکار رسید.
+                    <p className="absolute inset-x-4 bottom-[86px] text-center text-[10px] font-semibold leading-5 text-white drop-shadow">
+                      گوشی را نزدیک و روبه‌روی فاکتور نگه‌دار؛ نوشته‌های فارسی و رقم‌ها واضح‌تر ثبت می‌شوند.
                     </p>
                     <div className="absolute inset-x-0 bottom-4 flex items-center justify-center gap-4 px-4">
                       <button
@@ -670,13 +506,14 @@ export function ScannerModal({
                     <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
                       <span>
                         <span className="block text-xs font-extrabold text-slate-800">زبان فاکتور</span>
-                        <span className="mt-0.5 block text-[10px] text-slate-500">زبان متن فاکتور را انتخاب کن.</span>
+                        <span className="mt-0.5 block text-[10px] text-slate-500">فارسی اولویت دارد؛ برای متن لاتین، حالت ترکیبی را بزن.</span>
                       </span>
                       <select
                         value={ocrLanguage}
                         onChange={(event) => setOcrLanguage(event.target.value as ReceiptOcrLanguage)}
                         className="max-w-[160px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500"
                       >
+                        <option value="fa">فارسی — اولویت</option>
                         <option value="fa-en">فارسی + انگلیسی</option>
                         <option value="tr-en">ترکی + انگلیسی</option>
                       </select>
@@ -745,7 +582,7 @@ export function ScannerModal({
                         <Camera className="h-8 w-8" />
                         <span className="text-sm font-extrabold">گرفتن عکس</span>
                         <span className="text-[11px] text-blue-100">
-                          از فاکتور کاغذی
+                          از نزدیک و روبه‌رو بگیر تا فارسی و رقم‌ها واضح‌تر باشند.
                         </span>
                       </button>
 
@@ -775,21 +612,9 @@ export function ScannerModal({
                     />
 
                     {cameraError && (
-                      <div
-                        role="alert"
-                        className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"
-                      >
-                        <p>{cameraError}</p>
-                        {nativeCameraFallbackAvailable && (
-                          <button
-                            type="button"
-                            onClick={() => void captureUsingNativeCamera()}
-                            className="mt-2 rounded-lg bg-amber-900 px-3 py-2 text-[11px] font-bold text-white hover:bg-amber-800 cursor-pointer"
-                          >
-                            باز کردن دوربین گوشی
-                          </button>
-                        )}
-                      </div>
+                      <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                        {cameraError}
+                      </p>
                     )}
                   </div>
                 )}

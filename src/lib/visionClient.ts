@@ -15,12 +15,18 @@ import {
   recoverCollapsedReceiptLines,
 } from './persianMatcher';
 
-export type ReceiptOcrLanguage = 'fa-en' | 'tr-en';
+export type ReceiptOcrLanguage = 'fa' | 'fa-en' | 'tr-en';
 export type ReceiptProcessingMode = 'auto' | 'high-contrast';
 
 const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
+  fa: 'fas',
   'fa-en': 'fas+eng',
   'tr-en': 'tur+eng',
+};
+const OCR_ENGINE_NAMES: Record<ReceiptOcrLanguage, { display: string; receipt: string }> = {
+  fa: { display: 'OCR آفلاین فارسی', receipt: 'Tesseract FAS Offline' },
+  'fa-en': { display: 'OCR آفلاین فارسی و انگلیسی', receipt: 'Tesseract FAS+ENG Offline' },
+  'tr-en': { display: 'OCR آفلاین ترکی و انگلیسی', receipt: 'Tesseract TUR+ENG Offline' },
 };
 const MAX_RECEIPT_EDGE = 2800;
 const LONG_RECEIPT_MIN_EDGE = 2400;
@@ -566,7 +572,7 @@ export async function runOnDeviceAutonomousScan(
   width: number,
   height: number,
   shoppingItems: ShoppingItem[],
-  language: ReceiptOcrLanguage = 'fa-en',
+  language: ReceiptOcrLanguage = 'fa',
   onProgress?: (stage: string, pct: number) => void,
   ocrSegments: PreparedOcrSegment[] = []
 ): Promise<ScanResponse> {
@@ -770,7 +776,7 @@ export async function runOnDeviceAutonomousScan(
 
     return {
       ok: true,
-      engine: language === 'tr-en' ? 'OCR آفلاین ترکی و انگلیسی' : 'OCR آفلاین فارسی و انگلیسی',
+      engine: OCR_ENGINE_NAMES[language].display,
       durationMs: Date.now() - startedAt,
       originalImageUrl: previewUrl,
       processedImageUrl: previewUrl,
@@ -780,7 +786,7 @@ export async function runOnDeviceAutonomousScan(
       ocrQuality,
       receipt: {
         ...parsed,
-        ocr_engine: language === 'tr-en' ? 'Tesseract TUR+ENG Offline' : 'Tesseract FAS+ENG Offline',
+        ocr_engine: OCR_ENGINE_NAMES[language].receipt,
         raw_ocr_text: recoveredLines.join('\n'),
         image_url: previewUrl,
         processed_image_url: previewUrl,
@@ -816,7 +822,7 @@ export async function scanReceiptHybrid(params: {
     file,
     sampleId,
     imageUrl,
-    language = 'fa-en',
+    language = 'fa',
     processingMode = 'auto',
     shoppingItems,
     onProgress,

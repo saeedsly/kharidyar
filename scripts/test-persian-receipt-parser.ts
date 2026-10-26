@@ -5,6 +5,12 @@ import {
   recoverCollapsedReceiptLines,
 } from '../src/lib/persianMatcher';
 
+assert.equal(
+  normalizePersianText('يِك كالا ۱۲۳٬۴۵۶٫۷۸'),
+  'یک کالا 123,456.78',
+  'Normalize Arabic/Persian letter variants, OCR marks, and Persian amount digits.'
+);
+
 const collapsedReceipt =
   'فروشگاه زنجیره‌ای افق کوروش شعبه سعادت‌آباد - صندوق شماره ۳ تاریخ: 1405/08/01 شماره فاکتور: ‎OK-77419‏ ‏نام ‎VIS‏ تعداد قیمت واحد مبلغ کل 1- شیر کم چرب کاله 2 عدد 49,000 98,000 2- پنیر ‎Ud‏ صباح 1 بسته 65,000 65,000 3- تخم مرغ تازه 1 شانه 115,000 115,000 4- نان تست سه نان 1 بسته 42,000 42,000 5- ماست یونانی کاله 1 سطل 78,000 78,000 6- چیپس سرکه ای مزمز 1 بسته 45,000 45,000 gaz اقلام (تومان): 443,000 تخفیف خرید: 23,000 مبلغ قابل پرداخت (تومان): 420,000 از خرید شما سپاسگزاریم';
 
@@ -20,6 +26,21 @@ assert.equal(receipt.total_amount, 420_000);
 assert.equal(receipt.ocr_confidence, 92);
 assert.equal(parsePersianReceiptText([collapsedReceipt], [], 28).ocr_confidence, 28);
 assert.equal(receipt.items.length, 6);
+
+const persianDigitReceipt = parsePersianReceiptText([
+  'فروشگاه نمونه',
+  'شیر کم چرب کاله',
+  '۲ عدد ۴۹٬۰۰۰ ۹۸٬۰۰۰',
+  'جمع اقلام: ۹۸٬۰۰۰ تومان',
+  'مبلغ قابل پرداخت: ۹۸٬۰۰۰ تومان',
+]);
+assert.equal(persianDigitReceipt.items.length, 1);
+assert.equal(persianDigitReceipt.items[0].name, 'شیر کم چرب کاله');
+assert.equal(persianDigitReceipt.items[0].quantity, 2);
+assert.equal(persianDigitReceipt.items[0].total_price, 98_000);
+assert.equal(persianDigitReceipt.subtotal, 98_000);
+assert.equal(persianDigitReceipt.total_amount, 98_000);
+assert.equal(persianDigitReceipt.amount_read_from_receipt, true);
 
 const receiptWithUnreadableDiscountLabel = parsePersianReceiptText(
   recoveredLines.map((line) => (line.startsWith('تخفیف خرید:') ? line.replace('تخفیف خرید: ', '') : line))

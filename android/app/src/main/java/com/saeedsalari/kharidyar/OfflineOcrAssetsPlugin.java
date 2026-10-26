@@ -182,7 +182,7 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         boolean longReceipt = Boolean.TRUE.equals(call.getBoolean("longReceipt", false));
         boolean receiptTail = Boolean.TRUE.equals(call.getBoolean("receiptTail", false));
 
-        if (!("fas+eng".equals(language) || "tur+eng".equals(language))) {
+        if (!("fas".equals(language) || "fas+eng".equals(language) || "tur+eng".equals(language))) {
             call.reject("Unsupported offline OCR language.");
             return;
         }

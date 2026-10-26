@@ -45,11 +45,13 @@ export function formatCurrency(
 }
 
 export function normalizePersianText(input: string): string {
-  return toEnglishDigits(input || '')
+  const unicodeNormalized = String(input || '').normalize('NFKC');
+  return toEnglishDigits(unicodeNormalized)
     .replace(/[\u200E\u200F\u202A-\u202E]/g, '')
-    .replace(/ي/g, 'ی')
+    .replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, '') // Arabic/Persian vowel and Quranic marks are not word letters.
+    .replace(/[يى]/g, 'ی')
     .replace(/ك/g, 'ک')
-    .replace(/ۀ/g, 'ه')
+    .replace(/[ةۀ]/g, 'ه')
     .replace(/٬/g, ',') // Persian thousands separator U+066C
     .replace(/٫/g, '.') // Arabic decimal separator U+066B
     .replace(/ـ/g, '') // Arabic tatweel is decorative, not part of product names or amounts.

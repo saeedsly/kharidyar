@@ -157,8 +157,9 @@ jobs:
           **Test build only — not an official stable release.**
 
           This APK is provided for manual testing. It was built from commit ${GITHUB_SHA}.
-          It adds a live camera frame with advisory light/sharpness guidance and retains the native-camera fallback when WebView preview is unavailable.
-          Receipt OCR remains offline and on-device. The high-contrast Otsu option is experimental; Auto is recommended until both modes are compared on real receipts.
+          Android capture uses the native camera again; the in-preview framing box has been removed. Persian-only (`fas`) is now the default OCR model, and Persian+English remains selectable.
+          Persian/Arabic letter variants and digits are normalized locally; receipt OCR remains offline and on-device. The high-contrast Otsu option is experimental and has not been validated against native OCR.
+          The camera flow has not yet been verified on a physical handset.
           This pre-release does not certify OCR accuracy; review the extracted items and totals before saving.
           Check the Android 7 API 24 workflow for this app source before relying on offline OCR results.
           The APK may use a temporary signing key and may not update an existing installation signed with another key.
