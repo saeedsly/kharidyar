@@ -154,8 +154,9 @@ jobs:
           cat > "$notes_file" <<EOF
           **Test build only — not an official stable release.**
 
-          This APK is provided for testing. It was built from commit ${GITHUB_SHA}.
-          The Android 7 (API 24) offline OCR emulator workflow passed for the same app source.
+          This APK is provided for manual testing. It was built from commit ${GITHUB_SHA}.
+          This pre-release does not certify OCR accuracy; review the extracted items and totals before saving.
+          Check the Android 7 API 24 workflow for this app source before relying on offline OCR results.
           The APK may use a temporary signing key and may not update an existing installation signed with another key.
           EOF
 
