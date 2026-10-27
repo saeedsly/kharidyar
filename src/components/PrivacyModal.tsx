@@ -53,7 +53,7 @@ export function PrivacyModal({ isOpen, onClose, onClearAllUserData }: PrivacyMod
             <div className="rounded-2xl bg-white p-4 border border-slate-200/80 space-y-3">
               <p className="flex items-start gap-2 text-xs leading-6 text-slate-600">
                 <ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-emerald-600" />
-                فاکتورها و فهرست‌ها روی دستگاه ذخیره می‌شوند. اگر OCR ابری را در پنجرهٔ اسکن روشن کنی، تصویر برای تشخیص متن به Microsoft Azure فرستاده می‌شود؛ با خاموش‌کردن آن، تصویر از دستگاه خارج نمی‌شود.
+                فاکتورها و فهرست‌ها روی دستگاه ذخیره می‌شوند. اگر OCR ابری را در پنجرهٔ اسکن روشن کنی، تصویر از طریق Supabase برای تشخیص متن به OCR.space فرستاده می‌شود؛ با خاموش‌کردن آن، تصویر از دستگاه خارج نمی‌شود.
               </p>
               <a
                 href={assetUrl('privacy.html')}

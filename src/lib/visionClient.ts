@@ -3,7 +3,7 @@ import { createWorker } from 'tesseract.js';
 import type { BoundingBox, ScanResponse, ShoppingItem } from '../types';
 import { assetUrl } from './assetUrl';
 import { OfflineOcrAssets, type NativeOcrResult } from './offlineOcrAssets';
-import { isAzureReadConfigured, requestAzureRead } from './azureReadClient';
+import { isOcrSpaceConfigured, requestOcrSpace } from './ocrSpaceClient';
 import {
   addRgbaToHistogram,
   applyOtsuThreshold,
@@ -28,6 +28,7 @@ const OCR_ENGINE_NAMES: Record<ReceiptOcrLanguage, { display: string; receipt: s
   'tr-en': { display: 'OCR آفلاین ترکی و انگلیسی', receipt: 'Tesseract TUR+ENG Offline' },
 };
 const MAX_RECEIPT_EDGE = 2800;
+const OCR_SPACE_MAX_UPLOAD_BYTES = 950_000;
 const LONG_RECEIPT_MIN_EDGE = 2400;
 const RECEIPT_TILE_OVERLAP = 160;
 const LONG_THERMAL_TILE_HEIGHT = 1400;
@@ -255,6 +256,57 @@ function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob>
       reject(error);
     }
   });
+}
+
+async function prepareOcrSpaceImage(
+  file: File,
+  width: number,
+  height: number
+): Promise<{ file: File; width: number; height: number }> {
+  if (file.size <= OCR_SPACE_MAX_UPLOAD_BYTES) return { file, width, height };
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error('IMAGE_COMPRESSION_FAILED'));
+      element.src = objectUrl;
+    });
+    const sourceWidth = image.naturalWidth || width;
+    const sourceHeight = image.naturalHeight || height;
+    const attempts = [
+      [1, 0.90], [1, 0.82], [1, 0.74],
+      [0.88, 0.82], [0.88, 0.72],
+      [0.76, 0.82], [0.76, 0.72],
+      [0.64, 0.78], [0.55, 0.72], [0.45, 0.65],
+    ] as const;
+
+    for (const [scale, quality] of attempts) {
+      const cloudWidth = Math.max(1, Math.round(sourceWidth * scale));
+      const cloudHeight = Math.max(1, Math.round(sourceHeight * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = cloudWidth;
+      canvas.height = cloudHeight;
+      const context = canvas.getContext('2d', { alpha: false });
+      if (!context) throw new Error('IMAGE_COMPRESSION_FAILED');
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, cloudWidth, cloudHeight);
+      context.drawImage(image, 0, 0, cloudWidth, cloudHeight);
+
+      const blob = await canvasToJpeg(canvas, quality);
+      if (blob.size <= OCR_SPACE_MAX_UPLOAD_BYTES) {
+        return {
+          file: new File([blob], 'receipt-cloud.jpg', { type: 'image/jpeg' }),
+          width: cloudWidth,
+          height: cloudHeight,
+        };
+      }
+    }
+    throw new Error('OCR_SPACE_IMAGE_TOO_LARGE');
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -565,7 +617,7 @@ function deduplicateOverlappingLines(lines: OcrLineData[]): OcrLineData[] {
   return unique.sort((first, second) => first.bbox.y0 - second.bbox.y0);
 }
 
-async function runAzureCloudScan(params: {
+async function runOcrSpaceCloudScan(params: {
   segments: PreparedOcrSegment[];
   width: number;
   height: number;
@@ -591,18 +643,18 @@ async function runAzureCloudScan(params: {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       throw new Error('CLOUD_OFFLINE');
     }
-    if (params.segments.some((segment) => !segment.file.size || segment.file.size > 4 * 1024 * 1024)) {
-      throw new Error('AZURE_IMAGE_TOO_LARGE');
+    if (params.segments.some((segment) => !segment.file.size)) {
+      throw new Error('OCR_SPACE_IMAGE_TOO_LARGE');
     }
     const configured = await Promise.race([
       withTimeout(
-        isAzureReadConfigured(controller?.signal),
+        isOcrSpaceConfigured(controller?.signal),
         8_000,
         () => controller?.abort()
       ),
       cancellationPromise,
     ]);
-    if (!configured) throw new Error('AZURE_OCR_NOT_CONFIGURED');
+    if (!configured) throw new Error('OCR_SPACE_NOT_CONFIGURED');
 
     const scannedLines: OcrLineData[] = [];
     let confidenceTotal = 0;
@@ -611,23 +663,34 @@ async function runAzureCloudScan(params: {
       if (cancelRequested) throw new Error('SCAN_CANCELLED');
       const segment = params.segments[index];
       const stage = params.segments.length > 1
-        ? `ارسال بخش ${index + 1} از ${params.segments.length} به OCR ابری Microsoft...`
-        : 'در حال خواندن فاکتور با OCR ابری Microsoft...';
+        ? `آماده‌سازی بخش ${index + 1} از ${params.segments.length} برای OCR.space...`
+        : 'آماده‌سازی تصویر برای OCR.space...';
       progress(stage, 22 + (index / params.segments.length) * 65);
 
-      const azureLines = await Promise.race([
+      const cloudImage = await Promise.race([
+        prepareOcrSpaceImage(segment.file, segment.width, segment.height),
+        cancellationPromise,
+      ]);
+      if (cancelRequested) throw new Error('SCAN_CANCELLED');
+      const uploadedKilobytes = Math.ceil(cloudImage.file.size / 1_000);
+      const sendingStage = params.segments.length > 1
+        ? `خواندن بخش ${index + 1} از ${params.segments.length} با OCR.space Engine 3 (${uploadedKilobytes} از حداکثر ۱۰۰۰ کیلوبایت)...`
+        : `در حال خواندن فاکتور با OCR.space Engine 3 (${uploadedKilobytes} از حداکثر ۱۰۰۰ کیلوبایت)...`;
+      progress(sendingStage, 22 + (index / params.segments.length) * 65);
+
+      const ocrLines = await Promise.race([
         withTimeout(
-          requestAzureRead(segment.file, controller?.signal),
+          requestOcrSpace(cloudImage.file, cloudImage.width, cloudImage.height, controller?.signal),
           105_000,
           () => controller?.abort()
         ),
         cancellationPromise,
       ]);
       if (cancelRequested) throw new Error('SCAN_CANCELLED');
-      if (!azureLines.length) throw new Error('AZURE_OCR_NO_TEXT');
+      if (!ocrLines.length) throw new Error('OCR_SPACE_NO_TEXT');
 
       const segmentLines = filterSegmentOwnedLines(
-        azureLines.map((line) => mapSegmentLine({
+        ocrLines.map((line) => mapSegmentLine({
           text: line.text,
           confidence: line.confidence,
           bbox: {
@@ -677,7 +740,7 @@ async function runAzureCloudScan(params: {
 
     return {
       ok: true,
-      engine: 'Microsoft Azure Document Intelligence Read',
+      engine: 'OCR.space Engine 3',
       durationMs: Date.now() - startedAt,
       originalImageUrl: params.previewUrl,
       processedImageUrl: params.previewUrl,
@@ -687,7 +750,7 @@ async function runAzureCloudScan(params: {
       ocrQuality,
       receipt: {
         ...parsed,
-        ocr_engine: 'Azure Document Intelligence Read',
+        ocr_engine: 'OCR.space Engine 3',
         raw_ocr_text: recoveredLines.join('\n'),
         image_url: params.previewUrl,
         processed_image_url: params.previewUrl,
@@ -990,7 +1053,7 @@ export async function scanReceiptHybrid(params: {
   try {
     if (useCloudOcr) {
       try {
-        return await runAzureCloudScan({
+        return await runOcrSpaceCloudScan({
           segments: prepared.ocrSegments,
           width: prepared.width,
           height: prepared.height,
@@ -1007,13 +1070,15 @@ export async function scanReceiptHybrid(params: {
         );
         const fallbackMessage = typeof navigator !== 'undefined' && navigator.onLine === false
           ? 'اینترنت در دسترس نیست؛ ادامه با OCR آفلاین روی گوشی...'
-          : cloudErrorCode === 'AZURE_IMAGE_TOO_LARGE'
-            ? 'یک بخش عکس از سقف ۴ مگابایت بزرگ‌تر است؛ عکس ارسال نشد و OCR آفلاین ادامه می‌یابد...'
-            : cloudErrorCode === 'AZURE_OCR_NOT_CONFIGURED'
+          : cloudErrorCode === 'OCR_SPACE_IMAGE_TOO_LARGE'
+            ? 'بخش عکس برای سقف ۱ مگابایت OCR.space کوچک نشد؛ عکس ارسال نشد و OCR آفلاین ادامه می‌یابد...'
+            : cloudErrorCode === 'OCR_SPACE_NOT_CONFIGURED'
               ? 'سرویس OCR ابری هنوز پیکربندی نشده؛ ادامه با OCR آفلاین روی گوشی...'
-              : ['AZURE_QUOTA_OR_RATE_LIMIT', 'AZURE_QUOTA_EXCEEDED'].includes(cloudErrorCode)
-                ? 'سهمیهٔ رایگان یا نرخ درخواست Azure پر شده؛ ادامه با OCR آفلاین روی گوشی...'
-                : 'OCR ابری پاسخ نداد؛ ادامه با OCR آفلاین روی گوشی...';
+              : cloudErrorCode === 'OCR_SPACE_QUOTA_OR_RATE_LIMIT'
+                ? 'سهمیهٔ رایگان یا سقف درخواست OCR.space پر شده؛ ادامه با OCR آفلاین روی گوشی...'
+                : cloudErrorCode === 'OCR_SPACE_API_KEY_INVALID'
+                  ? 'کلید OCR.space معتبر نیست؛ ادامه با OCR آفلاین روی گوشی...'
+                  : 'OCR ابری پاسخ نداد؛ ادامه با OCR آفلاین روی گوشی...';
         onProgress?.(fallbackMessage, 20, prepared.previewUrl);
       }
     }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { AzureReadError, isAzureReadConfigured, requestAzureRead } from '../src/lib/azureReadClient';
+import { OcrSpaceError, isOcrSpaceConfigured, requestOcrSpace } from '../src/lib/ocrSpaceClient';
 
 async function main() {
   const originalFetch = globalThis.fetch;
@@ -45,14 +45,17 @@ async function main() {
   }) as typeof fetch;
 
   try {
-    assert.equal(await isAzureReadConfigured(), true);
+    assert.equal(await isOcrSpaceConfigured(), true);
     assert.match(lastHeaders?.get('apikey') || '', /^sb_publishable_/);
 
     const image = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'receipt.jpg', { type: 'image/jpeg' });
-    const lines = await requestAzureRead(image);
+    const lines = await requestOcrSpace(image, 200, 400);
     assert.equal(postCalls, 1);
     assert.ok(lastBody instanceof FormData);
-    assert.ok((lastBody as FormData).get('image') instanceof Blob);
+    const form = lastBody as FormData;
+    assert.ok(form.get('image') instanceof Blob);
+    assert.equal(form.get('imageWidth'), '200');
+    assert.equal(form.get('imageHeight'), '400');
     assert.equal(lines.length, 1);
     assert.equal(lines[0].text, 'نان سنگک');
     assert.equal(lines[0].bbox.x0, 0);
@@ -60,17 +63,24 @@ async function main() {
     assert.equal(lines[0].confidence, 88);
 
     configured = false;
-    assert.equal(await isAzureReadConfigured(), false);
+    assert.equal(await isOcrSpaceConfigured(), false);
     assert.equal(postCalls, 1, 'an unconfigured service must not receive an image');
 
-    failure = { status: 429, code: 'AZURE_QUOTA_EXCEEDED' };
+    const tooLarge = new File([new Uint8Array(1_000_001)], 'large.jpg', { type: 'image/jpeg' });
     await assert.rejects(
-      requestAzureRead(image),
-      (error: unknown) => error instanceof AzureReadError &&
-        error.code === 'AZURE_QUOTA_EXCEEDED' && error.status === 429,
+      requestOcrSpace(tooLarge, 200, 400),
+      (error: unknown) => error instanceof OcrSpaceError && error.code === 'OCR_SPACE_IMAGE_TOO_LARGE',
+    );
+    assert.equal(postCalls, 1, 'an oversized image must not be sent to the function');
+
+    failure = { status: 429, code: 'OCR_SPACE_QUOTA_OR_RATE_LIMIT' };
+    await assert.rejects(
+      requestOcrSpace(image, 200, 400),
+      (error: unknown) => error instanceof OcrSpaceError &&
+        error.code === 'OCR_SPACE_QUOTA_OR_RATE_LIMIT' && error.status === 429,
     );
 
-    console.log('PASS: status gate, multipart image request, normalized OCR lines, and quota error mapping (mocked; no network).');
+    console.log('PASS: status gate, 1 MB guard, multipart image request, normalized OCR lines, and quota error mapping (mocked; no network).');
   } finally {
     globalThis.fetch = originalFetch;
   }
