@@ -33,12 +33,8 @@ public class OfflineOcrEmulatorTest {
             AtomicReference<String> browserConsole = new AtomicReference<>("");
             AtomicReference<String> missingNativeModel = new AtomicReference<>();
             scenario.onActivity(activity -> {
-                String[] languages = { "fas", "eng", "tur" };
-                int[] modelResources = {
-                    R.raw.fas_traineddata,
-                    R.raw.eng_traineddata,
-                    R.raw.tur_traineddata,
-                };
+                String[] languages = { "fas" };
+                int[] modelResources = { R.raw.fas_traineddata };
                 for (int index = 0; index < languages.length; index++) {
                     String language = languages[index];
                     try (InputStream input = activity.getResources().openRawResource(modelResources[index])) {

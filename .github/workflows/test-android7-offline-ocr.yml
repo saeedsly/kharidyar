@@ -14,7 +14,7 @@ permissions:
 jobs:
   build-test-apk:
     if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[build-test-apk]') }}
-    name: Build v1.4.5 debug APK artifact
+    name: Build v1.4.6 debug APK artifact
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -60,7 +60,7 @@ jobs:
             -PKHARIDYAR_VERSION_CODE="$version_code"
           mkdir -p ../apk-output
           cp app/build/outputs/apk/debug/app-debug.apk \
-            ../apk-output/KharidYar-Android-v1.4.5-debug.apk
+            ../apk-output/KharidYar-Android-v1.4.6-debug.apk
 
       - name: Verify APK signature
         run: |
@@ -71,7 +71,7 @@ jobs:
       - name: Upload test APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KharidYar-Android-v1.4.5-debug
+          name: KharidYar-Android-v1.4.6-debug
           path: apk-output/*.apk
           if-no-files-found: error
           retention-days: 30

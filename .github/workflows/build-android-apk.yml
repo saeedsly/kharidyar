@@ -110,7 +110,7 @@ jobs:
             -PKHARIDYAR_VERSION_CODE="$version_code"
           mkdir -p ../apk-output
           cp app/build/outputs/apk/release/app-release.apk \
-            "../apk-output/KharidYar-Android-v1.4.5-${KHARIDYAR_SIGNING_MODE}.apk"
+            "../apk-output/KharidYar-Android-v1.4.6-${KHARIDYAR_SIGNING_MODE}.apk"
 
       - name: Verify APK signature
         shell: bash
@@ -123,7 +123,7 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: KharidYar-Android-v1.4.5-${{ steps.signing.outputs.mode }}
+          name: KharidYar-Android-v1.4.6-${{ steps.signing.outputs.mode }}
           path: apk-output/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -160,7 +160,7 @@ jobs:
           **Test build only — not an official stable release.**
 
           This APK is provided for manual testing. It was built from commit ${GITHUB_SHA}.
-          Android capture uses the native camera again; the in-preview framing box has been removed. Persian-first FAS+ENG is the default OCR model; English remains available for Latin names.
+          Android capture uses the native camera again; the in-preview framing box has been removed. Both cloud and offline receipt OCR use only the Persian FAS model; English and Turkish OCR options are removed.
           Optional OCR.space Engine 3 is used only when the user enables cloud OCR and the Supabase function reports configured; otherwise the app falls back locally. The OCR.space API key is not embedded in this APK. This build has not been live-tested against the cloud OCR provider.
           Persian/Arabic letter variants and digits are normalized locally; when cloud OCR is disabled or unavailable, receipt text is read by the on-device engine. The high-contrast Otsu option is experimental and has not been validated against native OCR.
           The camera flow has not yet been verified on a physical handset.

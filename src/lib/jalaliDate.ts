@@ -122,7 +122,7 @@ export function normalizeReceiptDate(value: string | null | undefined): string |
     return `${converted.year}-${String(converted.month).padStart(2, '0')}-${String(converted.day).padStart(2, '0')}`;
   }
 
-  // Turkish receipts commonly print dates as DD.MM.YYYY.
+  // Preserve day-first Gregorian dates printed on receipts.
   match = source.match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2}|19\d{2})\b/);
   if (match) {
     const converted = gregorianToJalali(Number(match[3]), Number(match[2]), Number(match[1]));

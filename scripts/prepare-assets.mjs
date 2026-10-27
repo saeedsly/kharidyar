@@ -6,7 +6,7 @@ import { transform } from 'esbuild';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const targetDir = path.join(rootDir, 'public', 'tessdata');
-// Bundle separate Android raw resources so native code can open each language
+// Bundle the Persian model as an Android raw resource so native code can load it
 // by a generated resource ID instead of relying on WebView/AssetManager paths.
 const nativeResourceDir = path.join(rootDir, 'android', 'app', 'src', 'main', 'res', 'raw');
 const obsoleteNativeModelDir = path.join(rootDir, 'android', 'app', 'src', 'main', 'assets', 'offline-ocr');
@@ -14,6 +14,9 @@ fs.rmSync(targetDir, { recursive: true, force: true });
 fs.rmSync(obsoleteNativeModelDir, { recursive: true, force: true });
 fs.mkdirSync(targetDir, { recursive: true });
 fs.mkdirSync(nativeResourceDir, { recursive: true });
+for (const code of ['eng', 'tur']) {
+  fs.rmSync(path.join(nativeResourceDir, `${code}_traineddata.gz`), { force: true });
+}
 
 const coreDir = path.join(rootDir, 'node_modules/tesseract.js-core');
 const asmCoreDir = path.join(rootDir, 'node_modules/tesseract.js-core-asm');
@@ -22,14 +25,6 @@ const assets = [
   [
     path.join(rootDir, 'node_modules/@tesseract.js-data/fas/4.0.0_best_int/fas.traineddata.gz'),
     'fas.traineddata.gz',
-  ],
-  [
-    path.join(rootDir, 'node_modules/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz'),
-    'eng.traineddata.gz',
-  ],
-  [
-    path.join(rootDir, 'node_modules/@tesseract.js-data/tur/4.0.0_best_int/tur.traineddata.gz'),
-    'tur.traineddata.gz',
   ],
   [path.join(rootDir, 'node_modules/tesseract.js/dist/worker.min.js'), 'worker.min.js'],
 ];
@@ -112,19 +107,15 @@ for (const [source, name] of assets) {
   }
 }
 
-for (const code of ['fas', 'eng', 'tur']) {
-  const modelFile = `${code}.traineddata.gz`;
-  const resourceFile = `${code}_traineddata.gz`;
-  fs.copyFileSync(path.join(targetDir, modelFile), path.join(nativeResourceDir, resourceFile));
-}
+fs.copyFileSync(
+  path.join(targetDir, 'fas.traineddata.gz'),
+  path.join(nativeResourceDir, 'fas_traineddata.gz')
+);
 
 const totalBytes = fs
   .readdirSync(targetDir)
   .reduce((sum, name) => sum + fs.statSync(path.join(targetDir, name)).size, 0);
-const nativeModelBytes = ['fas', 'eng', 'tur'].reduce(
-  (sum, code) => sum + fs.statSync(path.join(nativeResourceDir, `${code}_traineddata.gz`)).size,
-  0
-);
+const nativeModelBytes = fs.statSync(path.join(nativeResourceDir, 'fas_traineddata.gz')).size;
 console.log(
-  `[prepare-assets] Copied ${assets.length} offline OCR assets (${(totalBytes / 1024 / 1024).toFixed(1)} MiB) into public/tessdata/ and staged 3 native Android resources (${(nativeModelBytes / 1024 / 1024).toFixed(1)} MiB) in android/app/src/main/res/raw/`
+  `[prepare-assets] Copied ${assets.length} offline OCR assets (${(totalBytes / 1024 / 1024).toFixed(1)} MiB) into public/tessdata/ and staged the Persian Android model (${(nativeModelBytes / 1024 / 1024).toFixed(1)} MiB) in android/app/src/main/res/raw/`
 );

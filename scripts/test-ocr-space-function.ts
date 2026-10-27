@@ -22,7 +22,7 @@ async function main() {
     assert.ok(init?.body instanceof FormData);
     const providerForm = init?.body as FormData;
     assert.ok(providerForm.get('file') instanceof Blob);
-    assert.equal(providerForm.get('language'), 'auto');
+    assert.equal(providerForm.get('language'), 'fas');
     assert.equal(providerForm.get('OCREngine'), '3');
     assert.equal(providerForm.get('isTable'), 'true');
     assert.equal(providerForm.get('isOverlayRequired'), 'true');
@@ -81,7 +81,7 @@ async function main() {
     assert.equal(health.configured, false);
     assert.equal(health.provider, 'OCR.space');
     assert.equal(health.engine, 3);
-    assert.equal(health.language, 'auto');
+    assert.equal(health.language, 'fas');
     assert.equal(health.isTable, true);
     assert.equal(health.maxImageBytes, 1_000_000);
     assert.equal(health.freeEngine3ConversionsPerMonth, 1_000);

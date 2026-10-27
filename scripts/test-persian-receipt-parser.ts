@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {
+  formatCurrency,
+  keepPersianReceiptText,
   normalizePersianText,
   parsePersianReceiptText,
   recoverCollapsedReceiptLines,
@@ -10,6 +12,12 @@ assert.equal(
   'یک کالا 123,456.78',
   'Normalize Arabic/Persian letter variants, OCR marks, and Persian amount digits.'
 );
+assert.equal(keepPersianReceiptText('شیر Ud 90,000 90,000'), 'شیر 90,000 90,000');
+assert.equal(keepPersianReceiptText('milk 90,000'), '', 'Drop English-only OCR rows.');
+assert.equal(keepPersianReceiptText('2 * 490,000 980,000'), '2 * 490,000 980,000', 'Keep numeric thermal rows.');
+assert.equal(keepPersianReceiptText('شیر 49,000 لیر ₺'), 'شیر 49,000', 'Remove mistaken Lira markers.');
+assert.equal(keepPersianReceiptText('₺ 49,000'), '', 'A Lira-only row must not become an unnamed item.');
+assert.equal(formatCurrency(49_000, 'لیر'), '۴۹,۰۰۰ تومان');
 
 const collapsedReceipt =
   'فروشگاه زنجیره‌ای افق کوروش شعبه سعادت‌آباد - صندوق شماره ۳ تاریخ: 1405/08/01 شماره فاکتور: ‎OK-77419‏ ‏نام ‎VIS‏ تعداد قیمت واحد مبلغ کل 1- شیر کم چرب کاله 2 عدد 49,000 98,000 2- پنیر ‎Ud‏ صباح 1 بسته 65,000 65,000 3- تخم مرغ تازه 1 شانه 115,000 115,000 4- نان تست سه نان 1 بسته 42,000 42,000 5- ماست یونانی کاله 1 سطل 78,000 78,000 6- چیپس سرکه ای مزمز 1 بسته 45,000 45,000 gaz اقلام (تومان): 443,000 تخفیف خرید: 23,000 مبلغ قابل پرداخت (تومان): 420,000 از خرید شما سپاسگزاریم';
@@ -19,7 +27,7 @@ const receipt = parsePersianReceiptText([collapsedReceipt]);
 
 assert.ok(recoveredLines.length >= 12, `Expected receipt rows to be restored, got ${recoveredLines.length}.`);
 assert.equal(receipt.store_name, 'فروشگاه زنجیره ای افق کوروش شعبه سعادت آباد');
-assert.equal(receipt.receipt_number, 'OK-77419');
+assert.equal(receipt.receipt_number, '77419');
 assert.equal(receipt.subtotal, 443_000);
 assert.equal(receipt.discount_total, 23_000);
 assert.equal(receipt.total_amount, 420_000);
@@ -53,7 +61,7 @@ assert.deepEqual(
   receipt.items.map(({ name, quantity, unit_price, total_price }) => ({ name, quantity, unit_price, total_price })),
   [
     { name: 'شیر کم چرب کاله', quantity: 2, unit_price: 49_000, total_price: 98_000 },
-    { name: 'پنیر Ud صباح', quantity: 1, unit_price: 65_000, total_price: 65_000 },
+    { name: 'پنیر صباح', quantity: 1, unit_price: 65_000, total_price: 65_000 },
     { name: 'تخم مرغ تازه', quantity: 1, unit_price: 115_000, total_price: 115_000 },
     { name: 'نان تست سه نان', quantity: 1, unit_price: 42_000, total_price: 42_000 },
     { name: 'ماست یونانی کاله', quantity: 1, unit_price: 78_000, total_price: 78_000 },
@@ -164,7 +172,38 @@ const explicitRialReceipt = parsePersianReceiptText([
 assert.equal(explicitRialReceipt.total_amount, 650_000);
 assert.equal(explicitRialReceipt.detected_rial, true);
 assert.equal(explicitRialReceipt.currency_detected, true);
+assert.equal(explicitRialReceipt.currency, 'تومان');
+
+const misleadingLiraReceipt = parsePersianReceiptText([
+  'فروشگاه نمونه',
+  'شیر کم چرب کاله',
+  '1 عدد 49,000 49,000 TL',
+  'جمع اقلام: 49,000 TL',
+  'مبلغ قابل پرداخت: 49,000 TL',
+]);
+assert.equal(misleadingLiraReceipt.items.length, 1);
+assert.equal(misleadingLiraReceipt.total_amount, 49_000);
+assert.equal(misleadingLiraReceipt.currency, 'تومان');
+assert.equal(misleadingLiraReceipt.currency_detected, false);
+
+const receiptWithPaymentMetadata = parsePersianReceiptText([
+  'فروشگاه نمونه',
+  'شیر کم چرب کاله',
+  '1 عدد 49,000 49,000',
+  'شماره کارت: 6037 0000 0000 0000',
+  'کد رهگیری: 938475',
+  'تلفن فروشگاه: 021 12345678',
+  'هزینه ارسال: 15,000',
+  'توضیحات اضافی: 12,000',
+  'جمع اقلام: 49,000',
+  'مبلغ قابل پرداخت: 49,000',
+]);
+assert.equal(receiptWithPaymentMetadata.items.length, 1, 'Store and payment metadata must not become receipt items.');
+assert.equal(receiptWithPaymentMetadata.items[0].name, 'شیر کم چرب کاله');
+assert.equal(receiptWithPaymentMetadata.total_amount, 49_000);
+assert.ok(receiptWithPaymentMetadata.items.every((item) => !/[A-Za-z\u00C0-\u024F]/.test(item.name)));
+
 
 console.log(
-  'PASS: collapsed and two-line Persian thermal receipts, spaced thousands, final totals, and explicit-only Rial conversion.'
+  'PASS: Persian-only OCR text, conservative receipt-item filtering, Toman default, and explicit-only Rial conversion.'
 );

@@ -24,7 +24,6 @@ import { OfflineOcrAssets } from '../lib/offlineOcrAssets';
 import {
   cancelActiveOcrScan,
   scanReceiptHybrid,
-  type ReceiptOcrLanguage,
   type ReceiptProcessingMode,
 } from '../lib/visionClient';
 import {
@@ -98,8 +97,7 @@ export function ScannerModal({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [ocrLanguage, setOcrLanguage] = useState<ReceiptOcrLanguage>('fa-en');
-  const [useCloudOcr, setUseCloudOcr] = useState(true);
+  const [useCloudOcr, setUseCloudOcr] = useState(false);
   const [processingMode, setProcessingMode] = useState<ReceiptProcessingMode>('auto');
 
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
@@ -297,7 +295,6 @@ export function ScannerModal({
     try {
       const result = await scanReceiptHybrid({
         ...input,
-        language: ocrLanguage,
         processingMode,
         useCloudOcr,
         shoppingItems: targetShoppingItems,
@@ -354,7 +351,6 @@ export function ScannerModal({
     liveSubtotal - Number(discountTotal || 0) + Number(taxTotal || 0)
   );
   const resultCurrency = scanResult?.receipt.currency || 'تومان';
-  const isLiraCurrency = /(?:لیر|₺|\bTRY\b|\bTL\b)/i.test(resultCurrency);
   const scanQualityNeedsReview = Boolean(
     scanResult &&
       (scanResult.receipt.ocr_confidence < 65 ||
@@ -505,26 +501,19 @@ export function ScannerModal({
                   </div>
                 ) : (
                   <div className="rounded-3xl bg-white p-5 border border-slate-200/80 shadow-2xs space-y-4">
-                    <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
                       <span>
-                        <span className="block text-xs font-extrabold text-slate-800">زبان فاکتور</span>
-                        <span className="mt-0.5 block text-[10px] text-slate-500">OCR.space Engine 3 زبان را خودکار تشخیص می‌دهد؛ این انتخاب برای fallback آفلاین است.</span>
+                        <span className="block text-xs font-extrabold text-slate-800">زبان OCR</span>
+                        <span className="mt-0.5 block text-[10px] text-slate-500">خواندن فاکتور فقط با مدل فارسی انجام می‌شود.</span>
                       </span>
-                      <select
-                        value={ocrLanguage}
-                        onChange={(event) => setOcrLanguage(event.target.value as ReceiptOcrLanguage)}
-                        className="max-w-[160px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500"
-                      >
-                        <option value="fa-en">فارسی‌محور + انگلیسی</option>
-                        <option value="tr-en">ترکی + انگلیسی</option>
-                      </select>
-                    </label>
+                      <span className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800">فارسی</span>
+                    </div>
 
                     <label className="flex items-center justify-between gap-3 rounded-2xl border border-blue-200 bg-blue-50/70 px-3.5 py-3">
                       <span>
                         <span className="block text-xs font-extrabold text-slate-800">OCR ابری OCR.space · {useCloudOcr ? 'روشن' : 'خاموش'}</span>
                         <span className="mt-0.5 block max-w-[250px] text-[10px] leading-4 text-slate-600">
-                          در حالت روشن، تصویر از طریق Supabase برای OCR به OCR.space فرستاده می‌شود. سقف سرویس ۱ مگابایت است؛ برنامه در صورت نیاز تا حدود ۹۵۰ کیلوبایت فشرده‌اش می‌کند و نوشته‌های خیلی ریز ممکن است افت وضوح داشته باشند.
+                          فقط اگر تابع ابری در Supabase پیکربندی شده باشد، تصویر با OCR.space Engine 3 و زبان فارسی پردازش می‌شود؛ در غیر این صورت OCR محلی اجرا می‌شود. سقف هر تصویر ۱ مگابایت است و فشرده‌سازی ممکن است نوشته‌های خیلی ریز را کم‌وضوح کند.
                         </span>
                         <span className="mt-1 block max-w-[250px] text-[10px] leading-4 text-slate-500">
                           سهمیهٔ رایگان Engine 3: ۱۰۰۰ تبدیل در ماه؛ هر برش یک تبدیل است (سقف روزانهٔ کلی: ۵۰۰ درخواست برای هر IP). مبلغ‌ها را بازبینی کن.
@@ -549,8 +538,8 @@ export function ScannerModal({
                           <p className="text-xs font-extrabold text-slate-800">آماده‌سازی تصویر</p>
                           <p className="mt-0.5 text-[10px] leading-4 text-slate-500">
                             {useCloudOcr
-                              ? 'در حالت ابری، تصویر برای OCR به OCR.space Engine 3 ارسال می‌شود؛ در صورت نبود سرویس، OCR محلی اجرا می‌شود.'
-                              : 'در این حالت تصویر از دستگاه خارج نمی‌شود و OCR فقط محلی انجام می‌شود.'}
+                              ? 'در صورت پیکربندی تابع سمت سرور، تصویر با زبان فارسی به OCR.space Engine 3 فرستاده می‌شود؛ در غیر این صورت اسکن محلی انجام می‌شود.'
+                              : 'در این حالت تصویر از دستگاه خارج نمی‌شود و OCR فقط محلیِ فارسی انجام می‌شود.'}
                           </p>
                         </div>
                         <ScanLine className="h-5 w-5 shrink-0 text-blue-600" />
@@ -974,8 +963,7 @@ export function ScannerModal({
                   </div>
 
                   {/* Quick Rial <-> Toman Helper Bar */}
-                  {!isLiraCurrency && (
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 border border-slate-200/70">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 border border-slate-200/70">
                     <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
                       <ArrowLeftRight className="h-3.5 w-3.5 text-blue-600" />
                       اصلاح سریع واحد پول مبالغ:
@@ -997,7 +985,6 @@ export function ScannerModal({
                       </button>
                     </div>
                   </div>
-                  )}
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">

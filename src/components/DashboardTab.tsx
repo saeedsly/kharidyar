@@ -13,7 +13,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { Receipt, ShoppingItem, ShoppingList } from '../types';
-import { formatCurrency, formatToman, toPersianDigits } from '../lib/persianMatcher';
+import { formatToman, toPersianDigits } from '../lib/persianMatcher';
 import { formatMonthKey, getCurrentJalaliMonthKey, receiptDayKey, receiptMonthKey } from '../lib/jalaliDate';
 
 interface DashboardTabProps {
@@ -27,8 +27,6 @@ interface DashboardTabProps {
   onGoToReceipts: () => void;
   onSelectReceipt: (receipt: Receipt) => void;
 }
-
-const isLiraReceipt = (receipt: Receipt) => /(?:لیر|₺|\bTRY\b|\bTL\b)/i.test(receipt.currency || '');
 
 const CATEGORY_COLORS: Record<string, string> = {
   لبنیات: 'bg-blue-500',
@@ -58,14 +56,9 @@ export function DashboardTab({
   const monthReceipts = receipts.filter(
     (receipt) => receiptMonthKey(receipt.jalali_date || receipt.created_at) === currentMonthKey
   );
-  const monthTomanReceipts = monthReceipts.filter((receipt) => !isLiraReceipt(receipt));
-  const monthLiraReceipts = monthReceipts.filter(isLiraReceipt);
-  const monthlySpent = monthTomanReceipts.reduce((sum, receipt) => sum + Number(receipt.total_amount || 0), 0);
-  const monthlyLiraSpent = monthLiraReceipts.reduce((sum, receipt) => sum + Number(receipt.total_amount || 0), 0);
-  const monthlyDiscount = monthTomanReceipts.reduce((sum, receipt) => sum + Number(receipt.discount_total || 0), 0);
-  const totalSpent = receipts
-    .filter((receipt) => !isLiraReceipt(receipt))
-    .reduce((sum, receipt) => sum + Number(receipt.total_amount || 0), 0);
+  const monthlySpent = monthReceipts.reduce((sum, receipt) => sum + Number(receipt.total_amount || 0), 0);
+  const monthlyDiscount = monthReceipts.reduce((sum, receipt) => sum + Number(receipt.discount_total || 0), 0);
+  const totalSpent = receipts.reduce((sum, receipt) => sum + Number(receipt.total_amount || 0), 0);
   const budgetPercent = monthlyBudget > 0 ? Math.min(100, Math.round((monthlySpent / monthlyBudget) * 100)) : 0;
 
   useEffect(() => {
@@ -74,16 +67,14 @@ export function DashboardTab({
 
   const dailyGroups = new Map<
     string,
-    { dayKey: string; currency: string; total: number; stores: Set<string>; receiptCount: number }
+    { dayKey: string; total: number; stores: Set<string>; receiptCount: number }
   >();
   for (const receipt of monthReceipts) {
     const dayKey = receiptDayKey(receipt.jalali_date || receipt.created_at);
     if (!dayKey) continue;
-    const currency = isLiraReceipt(receipt) ? 'لیر' : 'تومان';
-    const groupKey = `${dayKey}|${currency}`;
+    const groupKey = dayKey;
     const group = dailyGroups.get(groupKey) || {
       dayKey,
-      currency,
       total: 0,
       stores: new Set<string>(),
       receiptCount: 0,
@@ -108,7 +99,7 @@ export function DashboardTab({
 
   // Aggregate product categories within the selected current Persian month.
   const categoryTotals: Record<string, number> = {};
-  for (const r of monthTomanReceipts) {
+  for (const r of monthReceipts) {
     for (const item of r.items || []) {
       const cat = item.category || 'خواربار';
       categoryTotals[cat] = (categoryTotals[cat] || 0) + Number(item.total_price || 0);
@@ -142,11 +133,6 @@ export function DashboardTab({
             <p className="mt-1 text-[11px] text-slate-500 tabular-fa">
               همهٔ خریدهای تومانی: {formatToman(totalSpent)}
             </p>
-            {monthlyLiraSpent > 0 && (
-              <p className="mt-1 text-[11px] font-semibold text-slate-600 tabular-fa">
-                خریدهای ثبت‌شده به لیر: {formatCurrency(monthlyLiraSpent, 'لیر')}
-              </p>
-            )}
           </div>
 
           <div className="text-left">
@@ -267,7 +253,7 @@ export function DashboardTab({
                       {group.receiptCount > 1 ? ` • ${toPersianDigits(group.receiptCount)} فاکتور` : ''}
                     </p>
                   </div>
-                  <span className="shrink-0 text-xs font-black tabular-fa">{formatCurrency(group.total, group.currency)}</span>
+                  <span className="shrink-0 text-xs font-black tabular-fa">{formatToman(group.total)}</span>
                 </div>
               ))}
             </div>
@@ -408,9 +394,9 @@ export function DashboardTab({
               </div>
               <div className="text-left shrink-0 mr-2">
                 <p className="text-sm font-extrabold text-slate-900 tabular-fa">
-                  {formatCurrency(rec.total_amount, rec.currency, false)}
+                  {formatToman(rec.total_amount, false)}
                 </p>
-                <p className="text-[11px] font-medium text-emerald-600">{isLiraReceipt(rec) ? 'لیر' : 'تومان'}</p>
+                <p className="text-[11px] font-medium text-emerald-600">تومان</p>
               </div>
             </button>
           ))}

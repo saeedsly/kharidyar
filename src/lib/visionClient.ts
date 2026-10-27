@@ -10,22 +10,19 @@ import {
   calculateOtsuThreshold,
 } from './receiptImageProcessing';
 import {
+  keepPersianReceiptText,
   normalizePersianText,
   parsePersianReceiptText,
   reconcileReceiptWithShoppingList,
   recoverCollapsedReceiptLines,
 } from './persianMatcher';
 
-export type ReceiptOcrLanguage = 'fa-en' | 'tr-en';
+export type ReceiptOcrLanguage = 'fa';
 export type ReceiptProcessingMode = 'auto' | 'high-contrast';
 
-const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = {
-  'fa-en': 'fas+eng',
-  'tr-en': 'tur+eng',
-};
+const OCR_LANGUAGES: Record<ReceiptOcrLanguage, string> = { fa: 'fas' };
 const OCR_ENGINE_NAMES: Record<ReceiptOcrLanguage, { display: string; receipt: string }> = {
-  'fa-en': { display: 'OCR آفلاین فارسی‌محور و انگلیسی', receipt: 'Tesseract FAS+ENG Offline' },
-  'tr-en': { display: 'OCR آفلاین ترکی و انگلیسی', receipt: 'Tesseract TUR+ENG Offline' },
+  fa: { display: 'OCR آفلاین فارسی', receipt: 'Tesseract FAS Offline' },
 };
 const MAX_RECEIPT_EDGE = 2800;
 const OCR_SPACE_MAX_UPLOAD_BYTES = 950_000;
@@ -571,6 +568,13 @@ function mapSegmentLine(line: OcrLineData, segment: PreparedOcrSegment): OcrLine
   };
 }
 
+function filterOcrLinesToPersian(lines: OcrLineData[]): OcrLineData[] {
+  return lines.flatMap((line) => {
+    const text = keepPersianReceiptText(line.text);
+    return text ? [{ ...line, text }] : [];
+  });
+}
+
 function filterSegmentOwnedLines(lines: OcrLineData[], segment: PreparedOcrSegment): OcrLineData[] {
   const ownedTop = segment.top === 0 ? 0 : segment.top + RECEIPT_TILE_OVERLAP / 2;
   const tileBottom = segment.top + segment.height;
@@ -709,7 +713,7 @@ async function runOcrSpaceCloudScan(params: {
       confidenceWeight += Math.max(1, segmentLines.length);
     }
 
-    const orderedLines = deduplicateOverlappingLines(scannedLines);
+    const orderedLines = filterOcrLinesToPersian(deduplicateOverlappingLines(scannedLines));
     const rawLines = orderedLines.map((line) => line.text.trim()).filter(Boolean);
     const lineBoxes = orderedLines.map((line) => ({
       x: Number((line.bbox.x0 / params.width).toFixed(4)),
@@ -774,7 +778,7 @@ export async function runOnDeviceAutonomousScan(
   width: number,
   height: number,
   shoppingItems: ShoppingItem[],
-  language: ReceiptOcrLanguage = 'fa-en',
+  language: ReceiptOcrLanguage = 'fa',
   onProgress?: (stage: string, pct: number) => void,
   ocrSegments: PreparedOcrSegment[] = []
 ): Promise<ScanResponse> {
@@ -893,7 +897,7 @@ export async function runOnDeviceAutonomousScan(
       } finally {
         await nativeProgressListener.remove();
       }
-      const orderedLines = deduplicateOverlappingLines(scannedLines);
+      const orderedLines = filterOcrLinesToPersian(deduplicateOverlappingLines(scannedLines));
       rawLines = orderedLines.map((line) => line.text.trim()).filter(Boolean);
       lineBoxes = orderedLines.map((line) => ({
         x: Number((line.bbox.x0 / width).toFixed(4)),
@@ -944,14 +948,14 @@ export async function runOnDeviceAutonomousScan(
         confidenceTotal += (Number.isFinite(segmentConfidence) ? segmentConfidence : 75) * weight;
         confidenceWeight += weight;
       }
-      const orderedLines = deduplicateOverlappingLines(scannedLines);
+      const orderedLines = filterOcrLinesToPersian(deduplicateOverlappingLines(scannedLines));
       rawLines = orderedLines.map((line) => line.text.trim()).filter(Boolean);
       lineBoxes = orderedLines.map((line) => ({
         x: Number((line.bbox.x0 / width).toFixed(4)),
         y: Number((line.bbox.y0 / height).toFixed(4)),
         w: Number(((line.bbox.x1 - line.bbox.x0) / width).toFixed(4)),
         h: Number(((line.bbox.y1 - line.bbox.y0) / height).toFixed(4)),
-        text: line.text?.trim() || '',
+        text: line.text.trim(),
         confidence: Math.round(line.confidence || 0),
       }));
       confidence = confidenceWeight ? confidenceTotal / confidenceWeight : 0;
@@ -1025,9 +1029,9 @@ export async function scanReceiptHybrid(params: {
     file,
     sampleId,
     imageUrl,
-    language = 'fa-en',
+    language = 'fa',
     processingMode = 'auto',
-    useCloudOcr = true,
+    useCloudOcr = false,
     shoppingItems,
     onProgress,
   } = params;

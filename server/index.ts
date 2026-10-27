@@ -8,7 +8,7 @@ import QRCode from 'qrcode';
 import {
   analyzeReceiptWithComputerVision,
   areWorkersWarm,
-  getOcrWorkers,
+  getOcrWorker,
 } from './ocrEngine';
 import { reconcileReceiptWithShoppingList } from '../src/lib/persianMatcher';
 import type { ShoppingItem } from '../src/types';
@@ -61,7 +61,7 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     app: 'خریدیـار (KharidYar)',
     version: '1.0.0',
-    cvEngine: 'OpenCV 5.0 + Dual-Head Persian LSTM OCR (fas+eng)',
+    cvEngine: 'OpenCV 5.0 + Persian Tesseract OCR (fas)',
     workersWarm: areWorkersWarm(),
     supabaseProjectRef: 'gngrgkrypvrgcnkldbhx',
     apkReady: Boolean(apkFile),
@@ -210,8 +210,8 @@ if (fs.existsSync(DIST_DIR)) {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 [خریدیـار Server] Listening on http://0.0.0.0:${PORT}`);
-  // Pre-warm neural OCR models in background so user scans take < 1 second!
-  getOcrWorkers()
-    .then(() => console.log('✅ [خریدیـار CV] Dual-Head Persian + English LSTM OCR Workers Warm & Ready!'))
+  // Pre-warm the Persian OCR worker in the background.
+  getOcrWorker()
+    .then(() => console.log('✅ [خریدیـار CV] Persian FAS OCR worker is warm and ready.'))
     .catch((e) => console.warn('⚠️ [خریدیـار CV] Worker warmup warning:', e));
 });

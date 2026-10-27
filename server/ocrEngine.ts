@@ -5,11 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createWorker, type Worker } from 'tesseract.js';
 import type { BoundingBox } from '../src/types';
-import {
-  fuseDualHeadLines,
-  parsePersianReceiptText,
-  type NeuralLineInput,
-} from '../src/lib/persianMatcher';
+import { keepPersianReceiptText, parsePersianReceiptText } from '../src/lib/persianMatcher';
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,28 +13,20 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 const TESSDATA_DIR = path.join(ROOT_DIR, 'public', 'tessdata');
 const CV_SCRIPT = path.join(__dirname, 'cv_pipeline.py');
 
-let fasWorkerPromise: Promise<Worker> | null = null;
-let biWorkerPromise: Promise<Worker> | null = null;
+let persianWorkerPromise: Promise<Worker> | null = null;
 let workersReady = false;
 
-export async function getOcrWorkers(): Promise<{ fasWorker: Worker; biWorker: Worker }> {
-  if (!fasWorkerPromise) {
-    fasWorkerPromise = createWorker('fas', 1, {
+export async function getOcrWorker(): Promise<Worker> {
+  if (!persianWorkerPromise) {
+    persianWorkerPromise = createWorker('fas', 1, {
       langPath: TESSDATA_DIR,
       gzip: true,
       cacheMethod: 'none',
     });
   }
-  if (!biWorkerPromise) {
-    biWorkerPromise = createWorker(['fas', 'eng'], 1, {
-      langPath: TESSDATA_DIR,
-      gzip: true,
-      cacheMethod: 'none',
-    });
-  }
-  const [fasWorker, biWorker] = await Promise.all([fasWorkerPromise, biWorkerPromise]);
+  const worker = await persianWorkerPromise;
   workersReady = true;
-  return { fasWorker, biWorker };
+  return worker;
 }
 
 export function areWorkersWarm(): boolean {
@@ -66,7 +54,7 @@ export async function runOpenCvPreprocess(inputPath: string, outputPath: string)
 export async function analyzeReceiptWithComputerVision(inputImagePath: string, enhancedOutputPath: string) {
   const startedAt = Date.now();
 
-  // Step 1: OpenCV 5.0 perspective & thermal contrast enhancement
+  // Step 1: OpenCV perspective correction and thermal contrast enhancement.
   let cvMeta: OpenCvResult | null = null;
   let imageForOcr = inputImagePath;
   try {
@@ -78,80 +66,42 @@ export async function analyzeReceiptWithComputerVision(inputImagePath: string, e
     console.warn('[CV] Python OpenCV fallback to raw image:', err);
   }
 
-  // Step 2: Dual-Head Neural LSTM OCR (`fas` lexical head + `fas+eng` numeric precision head) in parallel!
-  const { fasWorker, biWorker } = await getOcrWorkers();
-  const [fasRes, biRes] = await Promise.all([
-    fasWorker.recognize(imageForOcr, {}, { blocks: true }),
-    biWorker.recognize(imageForOcr, {}, { blocks: true }),
-  ]);
-
-  const imgW = cvMeta?.processedSize.width || 1500;
-  const imgH = cvMeta?.processedSize.height || 1600;
-
-  const fasLinesRaw =
-    fasRes.data.blocks?.flatMap((b) => b.paragraphs.flatMap((p) => p.lines)) || [];
-  const biLinesRaw =
-    biRes.data.blocks?.flatMap((b) => b.paragraphs.flatMap((p) => p.lines)) || [];
-
-  const neuralBoxes: BoundingBox[] = [];
-  const pairedLines: NeuralLineInput[] = [];
-
-  if (fasLinesRaw.length > 0) {
-    for (const fl of fasLinesRaw) {
-      const midY = (fl.bbox.y0 + fl.bbox.y1) / 2;
-      // Match corresponding horizontal line in bilingual numeric head by vertical overlap
-      let bestBi = '';
-      let minDist = Infinity;
-      for (const bl of biLinesRaw) {
-        const bMidY = (bl.bbox.y0 + bl.bbox.y1) / 2;
-        const dist = Math.abs(midY - bMidY);
-        if (dist < 28 && dist < minDist) {
-          minDist = dist;
-          bestBi = bl.text || '';
-        }
-      }
-
-      const normBox: BoundingBox = {
-        x: Number((fl.bbox.x0 / imgW).toFixed(4)),
-        y: Number((fl.bbox.y0 / imgH).toFixed(4)),
-        w: Number(((fl.bbox.x1 - fl.bbox.x0) / imgW).toFixed(4)),
-        h: Number(((fl.bbox.y1 - fl.bbox.y0) / imgH).toFixed(4)),
-        text: fl.text.trim(),
-        confidence: Math.round(fl.confidence || 90),
-      };
-      neuralBoxes.push(normBox);
-      pairedLines.push({
-        fasText: fl.text,
-        biText: bestBi,
-        confidence: fl.confidence || 88,
-        bbox: normBox,
-      });
-    }
-  } else {
-    const rawSplit = (fasRes.data.text || '').split(/\r?\n/);
-    const biSplit = (biRes.data.text || '').split(/\r?\n/);
-    rawSplit.forEach((ft, i) => {
-      pairedLines.push({
-        fasText: ft,
-        biText: biSplit[i] || '',
-        confidence: fasRes.data.confidence || 85,
-      });
-    });
-  }
-
-  // Step 3: Fuse Persian lexical tokens + exact comma-grouped numbers & self-healing arithmetic check
-  const fusedLines = fuseDualHeadLines(pairedLines);
-  const avgConfidence = ((fasRes.data.confidence || 84) + (biRes.data.confidence || 88)) / 2;
-  const parsedReceipt = parsePersianReceiptText(fusedLines, neuralBoxes, avgConfidence);
-
-  const durationMs = Date.now() - startedAt;
+  // Step 2: Read the receipt with the Persian-only Tesseract model.
+  const worker = await getOcrWorker();
+  const recognized = await worker.recognize(imageForOcr, {}, { blocks: true });
+  const rawBlockLines =
+    recognized.data.blocks?.flatMap((block) => block.paragraphs.flatMap((paragraph) => paragraph.lines)) || [];
+  const recognizedLines = rawBlockLines.flatMap((line) => {
+    const text = keepPersianReceiptText(line.text || '');
+    if (!text) return [];
+    const { x0, y0, x1, y1 } = line.bbox;
+    const box: BoundingBox = {
+      x: Number((x0 / (cvMeta?.processedSize.width || 1500)).toFixed(4)),
+      y: Number((y0 / (cvMeta?.processedSize.height || 1600)).toFixed(4)),
+      w: Number(((x1 - x0) / (cvMeta?.processedSize.width || 1500)).toFixed(4)),
+      h: Number(((y1 - y0) / (cvMeta?.processedSize.height || 1600)).toFixed(4)),
+      text,
+      confidence: Math.round(line.confidence || 0),
+    };
+    return [{ text, box }];
+  });
+  const fallbackLines = (recognized.data.text || '')
+    .split(/\r?\n/)
+    .map((line) => keepPersianReceiptText(line))
+    .filter(Boolean);
+  const receiptLines = recognizedLines.length
+    ? recognizedLines.map((line) => line.text)
+    : fallbackLines;
+  const lineBoxes = recognizedLines.map((line) => line.box);
+  const confidence = Number(recognized.data.confidence) || 0;
+  const parsedReceipt = parsePersianReceiptText(receiptLines, lineBoxes, confidence);
 
   return {
-    engine: 'OpenCV 5.0 + Dual-Head Persian LSTM OCR (fas + eng)',
-    durationMs,
+    engine: 'OpenCV 5.0 + Persian Tesseract LSTM (fas)',
+    durationMs: Date.now() - startedAt,
     perspectiveCropped: cvMeta?.perspectiveCropped ?? false,
-    lineBoxes: neuralBoxes.length > 0 ? neuralBoxes : cvMeta?.lineBoxes || [],
-    rawOcrText: fusedLines.join('\n'),
+    lineBoxes: lineBoxes.length > 0 ? lineBoxes : cvMeta?.lineBoxes || [],
+    rawOcrText: receiptLines.join('\n'),
     receipt: parsedReceipt,
   };
 }

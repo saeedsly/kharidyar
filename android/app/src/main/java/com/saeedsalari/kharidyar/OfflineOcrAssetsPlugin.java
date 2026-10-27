@@ -182,7 +182,7 @@ public class OfflineOcrAssetsPlugin extends Plugin {
         boolean longReceipt = Boolean.TRUE.equals(call.getBoolean("longReceipt", false));
         boolean receiptTail = Boolean.TRUE.equals(call.getBoolean("receiptTail", false));
 
-        if (!("fas+eng".equals(language) || "tur+eng".equals(language))) {
+        if (!"fas".equals(language)) {
             call.reject("Unsupported offline OCR language.");
             return;
         }
@@ -553,16 +553,8 @@ public class OfflineOcrAssetsPlugin extends Plugin {
     }
 
     private int getLanguageResourceId(String code) {
-        switch (code) {
-            case "fas":
-                return R.raw.fas_traineddata;
-            case "eng":
-                return R.raw.eng_traineddata;
-            case "tur":
-                return R.raw.tur_traineddata;
-            default:
-                throw new IllegalArgumentException("Unsupported offline OCR language: " + code);
-        }
+        if ("fas".equals(code)) return R.raw.fas_traineddata;
+        throw new IllegalArgumentException("Unsupported offline OCR language: " + code);
     }
 
     private void sendProgress(String stage, int percent) {

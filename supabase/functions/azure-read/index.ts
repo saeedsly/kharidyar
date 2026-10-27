@@ -249,7 +249,7 @@ Deno.serve(async (req: Request) => {
       configured,
       provider: "OCR.space",
       engine: 3,
-      language: "auto",
+      language: "fas",
       isTable: true,
       maxImageBytes: MAX_IMAGE_BYTES,
       freeEngine3ConversionsPerMonth: 1_000,
@@ -320,7 +320,7 @@ Deno.serve(async (req: Request) => {
     const imageHeight = imageDimension(form.get("imageHeight"));
     const providerForm = new FormData();
     providerForm.set("file", file, file.name || "receipt-image.jpg");
-    providerForm.set("language", "auto");
+    providerForm.set("language", "fas");
     providerForm.set("OCREngine", "3");
     providerForm.set("isTable", "true");
     providerForm.set("isOverlayRequired", "true");
