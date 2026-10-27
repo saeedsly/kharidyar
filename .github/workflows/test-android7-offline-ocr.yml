@@ -6,14 +6,78 @@ on:
       - arena/6332d18e-kharidyar
     paths-ignore:
       - .github/workflows/build-android-apk.yml
-      - .github/workflows/test-android7-offline-ocr.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  build-test-apk:
+    if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[build-test-apk]') }}
+    name: Build v1.4.4 debug APK artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Verify preinstalled Android SDK
+        run: |
+          set -euo pipefail
+          test -d "$ANDROID_HOME/platforms/android-35"
+          test -n "$(find "$ANDROID_HOME/build-tools" -name apksigner -type f -print -quit)"
+
+      - name: Run checks, build web assets, and sync Capacitor
+        run: |
+          npm ci --no-audit --no-fund
+          npm run test:azure-read-client
+          npm run test:azure-read-function
+          npm run test:ocr-parser
+          npm run test:ocr-image-processing
+          npx tsc --noEmit
+          npm run build
+          npx cap sync android
+
+      - name: Assemble installable debug APK
+        working-directory: android
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          version_code=$((7 + GITHUB_RUN_NUMBER))
+          ./gradlew --no-daemon --stacktrace :app:assembleDebug \
+            -PKHARIDYAR_VERSION_CODE="$version_code"
+          mkdir -p ../apk-output
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            ../apk-output/KharidYar-Android-v1.4.4-debug.apk
+
+      - name: Verify APK signature
+        run: |
+          set -euo pipefail
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          "$apksigner" verify --verbose apk-output/*.apk
+
+      - name: Upload test APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KharidYar-Android-v1.4.4-debug
+          path: apk-output/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
   api24-ocr:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[build-test-apk]') }}
     name: Run bundled receipt OCR on API 24
     runs-on: ubuntu-latest
     steps:
