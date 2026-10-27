@@ -128,9 +128,9 @@ export function ServerConnectTab({
             <ShieldCheck className="h-6 w-6 text-emerald-200" />
           </div>
           <div>
-            <h2 className="text-base font-black">خریدیـار، روی همین دستگاه</h2>
+            <h2 className="text-base font-black">خریدیـار، با داده‌های محلی</h2>
             <p className="mt-1.5 text-xs leading-6 text-emerald-50/90">
-              خواندن فاکتور و ذخیرهٔ خرید بدون اینترنت انجام می‌شود. تصویر فاکتور به سرور فرستاده نمی‌شود.
+              فاکتورها و خریدها روی همین دستگاه ذخیره می‌شوند. OCR ابری Microsoft اختیاری است؛ با روشن بودن آن، تصویر برای تشخیص متن ارسال می‌شود و با خاموش بودنش پردازش محلی می‌ماند.
             </p>
           </div>
         </div>

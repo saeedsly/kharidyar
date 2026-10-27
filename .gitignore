@@ -16,3 +16,9 @@ android/app/src/main/res/raw/
 public/downloads/
 KharidYar-v1.0.apk
 *.jks
+# Supabase Edge Function local secrets and generated state
+supabase/functions/.env
+supabase/.temp/
+.env
+.env.*
+!.env.example

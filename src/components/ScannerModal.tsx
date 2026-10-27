@@ -99,6 +99,7 @@ export function ScannerModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [ocrLanguage, setOcrLanguage] = useState<ReceiptOcrLanguage>('fa-en');
+  const [useCloudOcr, setUseCloudOcr] = useState(true);
   const [processingMode, setProcessingMode] = useState<ReceiptProcessingMode>('auto');
 
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
@@ -290,7 +291,7 @@ export function ScannerModal({
     releasePreview();
     setErrorMsg(null);
     setProgressPct(8);
-    setStageMessage('فشرده‌سازی عکس و آماده‌سازی اسکن آفلاین...');
+    setStageMessage('فشرده‌سازی عکس و آماده‌سازی OCR...');
     setStep('scanning');
 
     try {
@@ -298,6 +299,7 @@ export function ScannerModal({
         ...input,
         language: ocrLanguage,
         processingMode,
+        useCloudOcr,
         shoppingItems: targetShoppingItems,
         onProgress: (msg, pct, previewUrl) => {
           setStageMessage(msg);
@@ -506,7 +508,7 @@ export function ScannerModal({
                     <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
                       <span>
                         <span className="block text-xs font-extrabold text-slate-800">زبان فاکتور</span>
-                        <span className="mt-0.5 block text-[10px] text-slate-500">فارسی در OCR جلوتر است؛ نام‌های لاتین هم با مدل انگلیسی خوانده می‌شوند.</span>
+                        <span className="mt-0.5 block text-[10px] text-slate-500">Azure زبان را خودکار تشخیص می‌دهد؛ این انتخاب برای fallback آفلاین است.</span>
                       </span>
                       <select
                         value={ocrLanguage}
@@ -518,6 +520,23 @@ export function ScannerModal({
                       </select>
                     </label>
 
+                    <label className="flex items-center justify-between gap-3 rounded-2xl border border-blue-200 bg-blue-50/70 px-3.5 py-3">
+                      <span>
+                        <span className="block text-xs font-extrabold text-slate-800">OCR ابری Microsoft · {useCloudOcr ? 'روشن' : 'خاموش'}</span>
+                        <span className="mt-0.5 block max-w-[250px] text-[10px] leading-4 text-slate-600">
+                          در حالت روشن، تصویر برای خواندن متن به Azure می‌رود. برای حفظ کامل حالت آفلاین، این گزینه را خاموش کن.
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        data-testid="receipt-cloud-ocr-toggle"
+                        checked={useCloudOcr}
+                        onChange={(event) => setUseCloudOcr(event.target.checked)}
+                        className="h-5 w-5 shrink-0 accent-blue-600"
+                        aria-label="فعال‌سازی OCR ابری Microsoft"
+                      />
+                    </label>
+
                     <section
                       aria-label="حالت پردازش تصویر"
                       className="rounded-2xl border border-slate-200 bg-white p-3.5"
@@ -526,7 +545,9 @@ export function ScannerModal({
                         <div>
                           <p className="text-xs font-extrabold text-slate-800">آماده‌سازی تصویر</p>
                           <p className="mt-0.5 text-[10px] leading-4 text-slate-500">
-                            پردازش و OCR روی همین دستگاه انجام می‌شود.
+                            {useCloudOcr
+                              ? 'در حالت ابری، تصویر برای OCR به Microsoft Azure ارسال می‌شود؛ در صورت نبود سرویس، OCR محلی اجرا می‌شود.'
+                              : 'در این حالت تصویر از دستگاه خارج نمی‌شود و OCR فقط محلی انجام می‌شود.'}
                           </p>
                         </div>
                         <ScanLine className="h-5 w-5 shrink-0 text-blue-600" />

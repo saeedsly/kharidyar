@@ -578,22 +578,22 @@ export default function App() {
             <div className="col-span-7 space-y-4">
               <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-xs font-bold text-emerald-700 shadow-2xs border border-emerald-200/80">
                 <WifiOff className="h-3.5 w-3.5" />
-                خریدیـار روی دستگاه • بدون نیاز به اتصال اینترنت
+                خریدیـار روی دستگاه • OCR ابری اختیاری
               </div>
 
               <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-snug">
                 خریدیـار
                 <span className="block text-base font-bold text-slate-600 mt-1">
-                  اسکن فاکتور و مدیریت فهرست خرید؛ بدون نیاز به اینترنت
+                  اسکن فاکتور و مدیریت فهرست خرید؛ آنلاین یا آفلاین
                 </span>
               </h1>
 
               <div className="flex items-start gap-3 rounded-3xl bg-white p-4 border border-slate-200/80 shadow-xs">
                 <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
                 <div className="flex-1">
-                  <h2 className="text-sm font-extrabold text-slate-900">اطلاعات روی دستگاه شما می‌ماند</h2>
+                  <h2 className="text-sm font-extrabold text-slate-900">خریدها روی دستگاه شما ذخیره می‌شوند</h2>
                   <p className="mt-1 text-xs leading-5 text-slate-600">
-                    فاکتورها و فهرست‌ها روی دستگاه ذخیره می‌شوند؛ تصویر برای پردازش به سرور فرستاده نمی‌شود.
+                    فاکتورها و فهرست‌ها روی دستگاه ذخیره می‌شوند. با روشن‌کردن OCR ابری در اسکن، تصویر برای تشخیص متن به Azure فرستاده می‌شود؛ برای پردازش کاملاً محلی آن را خاموش کنید.
                   </p>
                 </div>
                 <button

@@ -1,0 +1,4 @@
+project_id = "kharidyar"
+
+[functions.azure-read]
+verify_jwt = false

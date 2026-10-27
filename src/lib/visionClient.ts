@@ -3,6 +3,7 @@ import { createWorker } from 'tesseract.js';
 import type { BoundingBox, ScanResponse, ShoppingItem } from '../types';
 import { assetUrl } from './assetUrl';
 import { OfflineOcrAssets, type NativeOcrResult } from './offlineOcrAssets';
+import { isAzureReadConfigured, requestAzureRead } from './azureReadClient';
 import {
   addRgbaToHistogram,
   applyOtsuThreshold,
@@ -564,6 +565,146 @@ function deduplicateOverlappingLines(lines: OcrLineData[]): OcrLineData[] {
   return unique.sort((first, second) => first.bbox.y0 - second.bbox.y0);
 }
 
+async function runAzureCloudScan(params: {
+  segments: PreparedOcrSegment[];
+  width: number;
+  height: number;
+  previewUrl: string;
+  shoppingItems: ShoppingItem[];
+  onProgress?: (stage: string, percent: number) => void;
+}): Promise<ScanResponse> {
+  const startedAt = Date.now();
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  let rejectCancellation!: (reason: Error) => void;
+  const cancellationPromise = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const cancelCloudScan = () => {
+    cancelRequested = true;
+    controller?.abort();
+    rejectCancellation(new Error('SCAN_CANCELLED'));
+  };
+  activeCancel = cancelCloudScan;
+  activeProgress = params.onProgress || null;
+
+  try {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      throw new Error('CLOUD_OFFLINE');
+    }
+    if (params.segments.some((segment) => !segment.file.size || segment.file.size > 4 * 1024 * 1024)) {
+      throw new Error('AZURE_IMAGE_TOO_LARGE');
+    }
+    const configured = await Promise.race([
+      withTimeout(
+        isAzureReadConfigured(controller?.signal),
+        8_000,
+        () => controller?.abort()
+      ),
+      cancellationPromise,
+    ]);
+    if (!configured) throw new Error('AZURE_OCR_NOT_CONFIGURED');
+
+    const scannedLines: OcrLineData[] = [];
+    let confidenceTotal = 0;
+    let confidenceWeight = 0;
+    for (let index = 0; index < params.segments.length; index++) {
+      if (cancelRequested) throw new Error('SCAN_CANCELLED');
+      const segment = params.segments[index];
+      const stage = params.segments.length > 1
+        ? `ارسال بخش ${index + 1} از ${params.segments.length} به OCR ابری Microsoft...`
+        : 'در حال خواندن فاکتور با OCR ابری Microsoft...';
+      progress(stage, 22 + (index / params.segments.length) * 65);
+
+      const azureLines = await Promise.race([
+        withTimeout(
+          requestAzureRead(segment.file, controller?.signal),
+          105_000,
+          () => controller?.abort()
+        ),
+        cancellationPromise,
+      ]);
+      if (cancelRequested) throw new Error('SCAN_CANCELLED');
+      if (!azureLines.length) throw new Error('AZURE_OCR_NO_TEXT');
+
+      const segmentLines = filterSegmentOwnedLines(
+        azureLines.map((line) => mapSegmentLine({
+          text: line.text,
+          confidence: line.confidence,
+          bbox: {
+            x0: line.bbox.x0 * segment.width,
+            y0: line.bbox.y0 * segment.height,
+            x1: line.bbox.x1 * segment.width,
+            y1: line.bbox.y1 * segment.height,
+          },
+        }, segment)),
+        segment
+      );
+      scannedLines.push(...segmentLines);
+      const segmentConfidence = segmentLines.reduce((sum, line) => sum + line.confidence, 0) /
+        Math.max(1, segmentLines.length);
+      confidenceTotal += segmentConfidence * Math.max(1, segmentLines.length);
+      confidenceWeight += Math.max(1, segmentLines.length);
+    }
+
+    const orderedLines = deduplicateOverlappingLines(scannedLines);
+    const rawLines = orderedLines.map((line) => line.text.trim()).filter(Boolean);
+    const lineBoxes = orderedLines.map((line) => ({
+      x: Number((line.bbox.x0 / params.width).toFixed(4)),
+      y: Number((line.bbox.y0 / params.height).toFixed(4)),
+      w: Number(((line.bbox.x1 - line.bbox.x0) / params.width).toFixed(4)),
+      h: Number(((line.bbox.y1 - line.bbox.y0) / params.height).toFixed(4)),
+      text: line.text,
+      confidence: Math.round(line.confidence || 0),
+    }));
+    const confidence = confidenceWeight ? confidenceTotal / confidenceWeight : 0;
+    const recoveredLines = recoverCollapsedReceiptLines(rawLines);
+    const recoveredLineBoxes = recoveredLines.length === lineBoxes.length ? lineBoxes : [];
+    progress('در حال استخراج اقلام و کنترل مبلغ‌ها با parser داخلی...', 94);
+    const parsed = parsePersianReceiptText(recoveredLines, recoveredLineBoxes, confidence);
+    const reconciliation = reconcileReceiptWithShoppingList(parsed.items, params.shoppingItems);
+    const itemSubtotal = parsed.items.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
+    const amountTolerance = Math.max(500, Math.round(Math.abs(parsed.subtotal) * 0.001));
+    const payableFromItems = Math.max(0, itemSubtotal - parsed.discount_total + parsed.tax_total);
+    const ocrQuality = {
+      itemCount: parsed.items.length,
+      unrecognizedItemCount: parsed.items.filter((item) => item.name.startsWith('کالای نامشخص')).length,
+      amountReadFromReceipt: parsed.amount_read_from_receipt,
+      subtotalReadFromReceipt: parsed.subtotal_read_from_receipt,
+      itemTotalsMatchSubtotal: Math.abs(itemSubtotal - parsed.subtotal) <= amountTolerance,
+      payableMatchesItems: Math.abs(parsed.total_amount - payableFromItems) <= amountTolerance,
+    };
+    progress('فاکتور آمادهٔ بازبینی است.', 100);
+
+    return {
+      ok: true,
+      engine: 'Microsoft Azure Document Intelligence Read',
+      durationMs: Date.now() - startedAt,
+      originalImageUrl: params.previewUrl,
+      processedImageUrl: params.previewUrl,
+      perspectiveCropped: false,
+      lineBoxes: recoveredLineBoxes,
+      rawOcrText: recoveredLines.join('\n'),
+      ocrQuality,
+      receipt: {
+        ...parsed,
+        ocr_engine: 'Azure Document Intelligence Read',
+        raw_ocr_text: recoveredLines.join('\n'),
+        image_url: params.previewUrl,
+        processed_image_url: params.previewUrl,
+      },
+      reconciliation,
+    };
+  } catch (error) {
+    if (cancelRequested || (error as Error)?.message === 'SCAN_CANCELLED') {
+      throw new Error('SCAN_CANCELLED');
+    }
+    throw error;
+  } finally {
+    if (activeCancel === cancelCloudScan) activeCancel = null;
+    activeProgress = null;
+  }
+}
+
 export async function runOnDeviceAutonomousScan(
   compressedFile: File,
   previewUrl: string,
@@ -813,6 +954,7 @@ export async function scanReceiptHybrid(params: {
   imageUrl?: string | null;
   language?: ReceiptOcrLanguage;
   processingMode?: ReceiptProcessingMode;
+  useCloudOcr?: boolean;
   shoppingItems: ShoppingItem[];
   onProgress?: (stage: string, pct: number, previewUrl?: string) => void;
 }): Promise<ScanResponse> {
@@ -822,6 +964,7 @@ export async function scanReceiptHybrid(params: {
     imageUrl,
     language = 'fa-en',
     processingMode = 'auto',
+    useCloudOcr = true,
     shoppingItems,
     onProgress,
   } = params;
@@ -829,7 +972,7 @@ export async function scanReceiptHybrid(params: {
   const source: File | Blob | string =
     file || imageUrl || assetUrl(`samples/sample-${sampleId || 'ofogh'}.png`);
 
-  onProgress?.('فشرده‌سازی عکس و آماده‌سازی فاکتور روی گوشی...', 8);
+  onProgress?.('فشرده‌سازی عکس و آماده‌سازی OCR...', 8);
   const prepared = await normalizeAndCompressReceiptPhoto(source, processingMode);
   if (cancelRequested) {
     URL.revokeObjectURL(prepared.previewUrl);
@@ -839,12 +982,42 @@ export async function scanReceiptHybrid(params: {
     ? `؛ فاکتور در ${prepared.ocrSegments.length} بخشِ هم‌پوشان خوانده می‌شود`
     : '';
   onProgress?.(
-    `عکس آماده شد (${Math.max(1, Math.round(prepared.sizeBytes / 1024))} کیلوبایت)${segmentMessage}؛ شروع اسکن آفلاین...`,
+    `عکس آماده شد (${Math.max(1, Math.round(prepared.sizeBytes / 1024))} کیلوبایت)${segmentMessage}؛ آمادهٔ OCR...`,
     18,
     prepared.previewUrl
   );
 
   try {
+    if (useCloudOcr) {
+      try {
+        return await runAzureCloudScan({
+          segments: prepared.ocrSegments,
+          width: prepared.width,
+          height: prepared.height,
+          previewUrl: prepared.previewUrl,
+          shoppingItems,
+          onProgress: (stage, percent) => onProgress?.(stage, percent, prepared.previewUrl),
+        });
+      } catch (cloudError) {
+        if (cancelRequested || (cloudError as Error)?.message === 'SCAN_CANCELLED') {
+          throw new Error('SCAN_CANCELLED');
+        }
+        const cloudErrorCode = String(
+          (cloudError as { code?: unknown })?.code || (cloudError as Error)?.message || ''
+        );
+        const fallbackMessage = typeof navigator !== 'undefined' && navigator.onLine === false
+          ? 'اینترنت در دسترس نیست؛ ادامه با OCR آفلاین روی گوشی...'
+          : cloudErrorCode === 'AZURE_IMAGE_TOO_LARGE'
+            ? 'یک بخش عکس از سقف ۴ مگابایت بزرگ‌تر است؛ عکس ارسال نشد و OCR آفلاین ادامه می‌یابد...'
+            : cloudErrorCode === 'AZURE_OCR_NOT_CONFIGURED'
+              ? 'سرویس OCR ابری هنوز پیکربندی نشده؛ ادامه با OCR آفلاین روی گوشی...'
+              : ['AZURE_QUOTA_OR_RATE_LIMIT', 'AZURE_QUOTA_EXCEEDED'].includes(cloudErrorCode)
+                ? 'سهمیهٔ رایگان یا نرخ درخواست Azure پر شده؛ ادامه با OCR آفلاین روی گوشی...'
+                : 'OCR ابری پاسخ نداد؛ ادامه با OCR آفلاین روی گوشی...';
+        onProgress?.(fallbackMessage, 20, prepared.previewUrl);
+      }
+    }
+
     return await runOnDeviceAutonomousScan(
       prepared.compressedFile,
       prepared.previewUrl,

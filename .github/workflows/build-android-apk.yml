@@ -1,4 +1,4 @@
-name: Build offline Android APK
+name: Build KharidYar Android APK
 
 on:
   push:
@@ -47,8 +47,11 @@ jobs:
       - name: Build offline web assets and sync Capacitor
         run: |
           npm ci --no-audit --no-fund
+          npm run test:azure-read-client
+          npm run test:azure-read-function
           npm run test:ocr-parser
           npm run test:ocr-image-processing
+          npx tsc --noEmit
           npm run build
           npx cap sync android
 
@@ -107,7 +110,7 @@ jobs:
             -PKHARIDYAR_VERSION_CODE="$version_code"
           mkdir -p ../apk-output
           cp app/build/outputs/apk/release/app-release.apk \
-            "../apk-output/KharidYar-Android-v1.4.3-${KHARIDYAR_SIGNING_MODE}.apk"
+            "../apk-output/KharidYar-Android-v1.4.4-${KHARIDYAR_SIGNING_MODE}.apk"
 
       - name: Verify APK signature
         shell: bash
@@ -120,7 +123,7 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: KharidYar-Android-v1.4.3-${{ steps.signing.outputs.mode }}
+          name: KharidYar-Android-v1.4.4-${{ steps.signing.outputs.mode }}
           path: apk-output/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -158,7 +161,8 @@ jobs:
 
           This APK is provided for manual testing. It was built from commit ${GITHUB_SHA}.
           Android capture uses the native camera again; the in-preview framing box has been removed. Persian-first FAS+ENG is the default OCR model; English remains available for Latin names.
-          Persian/Arabic letter variants and digits are normalized locally; receipt OCR remains offline and on-device. The high-contrast Otsu option is experimental and has not been validated against native OCR.
+          Optional Azure Document Intelligence Read is used only when the user enables cloud OCR and the Supabase function reports configured; otherwise the app falls back locally. Azure secrets are not embedded in this APK. This build has not been live-tested against Azure.
+          Persian/Arabic letter variants and digits are normalized locally; when cloud OCR is disabled or unavailable, receipt text is read by the on-device engine. The high-contrast Otsu option is experimental and has not been validated against native OCR.
           The camera flow has not yet been verified on a physical handset.
           This pre-release does not certify OCR accuracy; review the extracted items and totals before saving.
           Check the Android 7 API 24 workflow for this app source before relying on offline OCR results.
